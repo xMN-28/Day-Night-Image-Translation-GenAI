@@ -1,0 +1,44 @@
+experiment:
+  name: cyclegan_bdd100k
+  seed: 42
+  output_dir: runs/cyclegan_bdd100k
+data:
+  root: data/bdd100k_daynight
+  image_size: 256
+  resize_size: 286
+  num_workers: 4
+  batch_size: 1
+model:
+  kind: cyclegan
+  generator_blocks: 9
+  base_channels: 64
+  attention: false
+  multiscale_discriminator: false
+loss:
+  gan: 1.0
+  cycle: 10.0
+  identity: 5.0
+  nce: 0.0
+  semantic: 0.0
+  edge: 0.0
+train:
+  max_steps: 20000
+  gradient_accumulation: 2
+  generator_lr: 0.0002
+  discriminator_lr: 0.0001
+  beta1: 0.5
+  beta2: 0.999
+  warmup_steps: 500
+  decay_start_step: 10000
+  grad_clip: 5.0
+  amp: bf16
+  replay_size: 50
+  ema_decay: 0.999
+  diffaugment: true
+  log_every: 25
+  image_every: 500
+  validate_every: 1000
+  save_every: 1000
+  keep_checkpoints: 4
+  plateau_patience: 4
+
