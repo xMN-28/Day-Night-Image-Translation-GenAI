@@ -76,3 +76,49 @@ def test_one_step_training_and_resume(tiny_dataset: Path, tmp_path: Path) -> Non
     )
     assert initialized_weight.equal(expected)
     initialized.writer.close()
+
+    v21_config = deepcopy(config)
+    v21_config["experiment"]["output_dir"] = str(tmp_path / "v2-1")
+    v21_config["model"].update(
+        {
+            "detail_refinement": True,
+            "detail_channels": 8,
+            "detail_blocks": 1,
+            "pyramid_levels": 2,
+            "frequency_discriminator": True,
+            "frequency_base_channels": 8,
+        }
+    )
+    v21_config["loss"].update(
+        {"wavelet": 1.0, "self_similarity": 1.0, "residual": 0.25, "frequency_gan": 0.2}
+    )
+    v21_config["train"].update(
+        {
+            "init_scope": "all",
+            "stages": [
+                {
+                    "name": "detail_warmup",
+                    "until_step": 1,
+                    "image_size": 64,
+                    "resize_size": 72,
+                    "learning_rates": {
+                        "base": 0.0,
+                        "refiner": 0.0001,
+                        "spatial_d": 0.0,
+                        "hf_d": 0.0001,
+                    },
+                }
+            ],
+        }
+    )
+    migrated = Trainer(
+        v21_config,
+        resume="none",
+        init_from=output / "checkpoints" / "step_00000001.pt",
+    )
+    migrated_weight = next(migrated.models["G_day_night"].base.parameters()).detach().cpu()
+    assert migrated_weight.equal(expected)
+    assert migrated.training_state["parent_checkpoint"]["source_step"] == 1
+    assert migrated.optimizers["G"].param_groups[0]["lr"] == 0.0
+    assert migrated.optimizers["G"].param_groups[1]["lr"] == 0.0001
+    migrated.writer.close()

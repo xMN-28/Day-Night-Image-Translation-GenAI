@@ -7,9 +7,14 @@ from daynight.losses import (
     color_statistics_loss,
     lsgan_discriminator_loss,
     patch_nce_loss,
+    refinement_residual_loss,
     regional_illumination_loss,
+    spatial_self_similarity_loss,
+    wavelet_structure_loss,
 )
 from daynight.models.networks import (
+    HaarWaveletDiscriminator,
+    LaplacianRefinementGenerator,
     LocalGlobalDiscriminator,
     MultiScaleDiscriminator,
     PatchDiscriminator,
@@ -68,3 +73,33 @@ def test_regional_illumination_targets_bright_upper_scene() -> None:
     loss.backward()
     assert generated.grad is not None
     assert generated.grad[:, :, :16].abs().sum() > 0
+
+
+def test_zero_initialized_laplacian_refiner_preserves_v2_output() -> None:
+    torch.manual_seed(7)
+    image = torch.randn(1, 3, 64, 64)
+    generator = LaplacianRefinementGenerator(
+        base_channels=8, blocks=1, attention=True, detail_channels=8, detail_blocks=1
+    )
+    generator.reset_refinement()
+    with torch.no_grad():
+        coarse = generator.base(image)
+        refined, details = generator(image, return_details=True)
+    assert torch.allclose(refined, coarse, atol=1e-6)
+    assert torch.equal(details["coarse"], coarse)
+
+
+def test_detail_losses_and_wavelet_critic_are_differentiable() -> None:
+    source = torch.randn(1, 3, 64, 64)
+    translated = torch.randn(1, 3, 64, 64, requires_grad=True).tanh()
+    critic = HaarWaveletDiscriminator(base_channels=8)
+    critic_output = critic(translated)
+    loss = (
+        wavelet_structure_loss(source, translated)
+        + spatial_self_similarity_loss(source, translated)
+        + refinement_residual_loss(translated * 0.9, translated)
+        + critic_output.square().mean()
+    )
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert translated.grad_fn is not None

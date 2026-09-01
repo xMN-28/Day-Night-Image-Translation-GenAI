@@ -1,0 +1,84 @@
+experiment:
+  name: lumicycle_v2_1_bdd100k
+  seed: 45
+  output_dir: runs/lumicycle_v2_1_bdd100k
+data:
+  root: data/bdd100k_daynight
+  image_size: 256
+  resize_size: 286
+  num_workers: 4
+  batch_size: 1
+  hard_detail_fraction: 0.30
+model:
+  kind: lumicycle_v2_1
+  generator_blocks: 9
+  base_channels: 64
+  attention: true
+  multiscale_discriminator: true
+  global_discriminator: true
+  detail_refinement: true
+  detail_channels: 32
+  detail_blocks: 3
+  pyramid_levels: 2
+  frequency_discriminator: true
+  frequency_base_channels: 32
+loss:
+  gan: 1.0
+  frequency_gan: 0.35
+  frequency_discriminator: 0.5
+  cycle: 10.0
+  identity: 2.0
+  nce: 1.0
+  semantic: 0.75
+  edge: 2.5
+  color: 0.5
+  illumination: 2.0
+  wavelet: 1.5
+  self_similarity: 1.0
+  residual: 0.25
+train:
+  max_steps: 6000
+  gradient_accumulation: 2
+  generator_lr: 0.00002
+  discriminator_lr: 0.00002
+  discriminator_every: 2
+  beta1: 0.5
+  beta2: 0.999
+  warmup_steps: 100
+  decay_start_step: 4500
+  grad_clip: 5.0
+  amp: bf16
+  replay_size: 50
+  ema_decay: 0.999
+  diffaugment: true
+  log_every: 10
+  image_every: 250
+  validate_every: 500
+  save_every: 500
+  keep_checkpoints: 6
+  plateau_patience: 4
+  max_plateau_reductions: 1
+  validation_color_weight: 0.15
+  validation_illumination_weight: 0.5
+  validation_wavelet_weight: 0.1
+  validation_similarity_weight: 0.25
+  init_scope: all
+  stages:
+    - name: detail_warmup
+      until_step: 1000
+      image_size: 256
+      resize_size: 286
+      learning_rates:
+        base: 0.0
+        refiner: 0.00005
+        spatial_d: 0.0
+        hf_d: 0.000025
+    - name: detail_finetune
+      until_step: 6000
+      image_size: 384
+      resize_size: 430
+      learning_rates:
+        base: 0.000005
+        refiner: 0.00002
+        spatial_d: 0.00001
+        hf_d: 0.00002

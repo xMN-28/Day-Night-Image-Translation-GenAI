@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .models.networks import discriminator_outputs
+from .models.networks import discriminator_outputs, haar_high_frequency
 
 
 def lsgan_generator_loss(output: torch.Tensor | list[torch.Tensor]) -> torch.Tensor:
@@ -189,3 +189,44 @@ def regional_illumination_loss(
     target_upper = weighted_mean(target_luminance, upper_prior.expand_as(target_luminance))
     focus_loss = F.smooth_l1_loss(generated_focus, target_upper)
     return band_loss + focus_loss
+
+
+def wavelet_structure_loss(
+    source: torch.Tensor, translated: torch.Tensor, levels: int = 2
+) -> torch.Tensor:
+    """Preserve normalized high-frequency structure across lighting changes."""
+    losses = []
+    source_level = source
+    translated_level = translated
+    for _ in range(levels):
+        source_high = haar_high_frequency(source_level).detach()
+        translated_high = haar_high_frequency(translated_level)
+        source_scale = source_high.abs().mean(dim=(2, 3), keepdim=True).clamp_min(1e-3)
+        translated_scale = translated_high.abs().mean(dim=(2, 3), keepdim=True).clamp_min(1e-3)
+        difference = source_high / source_scale - translated_high / translated_scale
+        losses.append(torch.sqrt(difference.square() + 1e-6).mean())
+        source_level = F.avg_pool2d(source_level, 2, ceil_mode=True)
+        translated_level = F.avg_pool2d(translated_level, 2, ceil_mode=True)
+    return torch.stack(losses).mean()
+
+
+def spatial_self_similarity_loss(
+    source: torch.Tensor, translated: torch.Tensor, grid_size: int = 12
+) -> torch.Tensor:
+    """F/LSeSim-inspired local spatial-correlation preservation."""
+
+    def descriptors(image: torch.Tensor) -> torch.Tensor:
+        gray = 0.299 * image[:, 0:1] + 0.587 * image[:, 1:2] + 0.114 * image[:, 2:3]
+        pooled = F.adaptive_avg_pool2d(gray, (grid_size, grid_size))
+        patches = F.unfold(pooled, kernel_size=3, padding=1).transpose(1, 2)
+        return F.normalize(patches, dim=-1)
+
+    source_descriptors = descriptors(source).detach()
+    translated_descriptors = descriptors(translated)
+    source_similarity = source_descriptors @ source_descriptors.transpose(1, 2)
+    translated_similarity = translated_descriptors @ translated_descriptors.transpose(1, 2)
+    return F.smooth_l1_loss(translated_similarity, source_similarity)
+
+
+def refinement_residual_loss(coarse: torch.Tensor, refined: torch.Tensor) -> torch.Tensor:
+    return F.smooth_l1_loss(refined, coarse.detach())

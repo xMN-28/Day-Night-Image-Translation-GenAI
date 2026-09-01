@@ -97,6 +97,10 @@ def status_text() -> str:
     variance = _latest(events, "health/output_variance")
     cycle = _latest(events, "G/cycle")
     edge = _latest(events, "G/edge")
+    wavelet = _latest(events, "G/wavelet")
+    similarity = _latest(events, "G/self_similarity")
+    residual = _latest(events, "G/residual")
+    frequency_accuracy = _latest(events, "D/frequency_accuracy")
     if generator is None:
         return "# LumiCycle live monitor\n\n🟡 **Training is starting…**"
 
@@ -106,6 +110,19 @@ def status_text() -> str:
     if config_path.exists():
         config = json.loads(config_path.read_text(encoding="utf-8"))
         max_steps = int(config.get("train", {}).get("max_steps", max_steps))
+    else:
+        config = {}
+
+    stages = config.get("train", {}).get("stages", [])
+    current_stage = next(
+        (stage for stage in stages if step < int(stage["until_step"])),
+        stages[-1] if stages else None,
+    )
+    stage_text = (
+        f"{current_stage['name']} at {current_stage['image_size']}px"
+        if current_stage
+        else "standard training"
+    )
 
     history = events.Scalars("G/total")
     first = history[0]
@@ -145,6 +162,11 @@ def status_text() -> str:
     d_loss = discriminator[1] if discriminator else float("nan")
     cycle_loss = cycle[1] if cycle else float("nan")
     edge_loss = edge[1] if edge else float("nan")
+    wavelet_loss = wavelet[1] if wavelet else float("nan")
+    similarity_loss = similarity[1] if similarity else float("nan")
+    residual_loss = residual[1] if residual else float("nan")
+    hf_accuracy = frequency_accuracy[1] if frequency_accuracy else float("nan")
+    log_every = int(config.get("train", {}).get("log_every", 25))
     return f"""# LumiCycle live text monitor
 
 {headline}  
@@ -154,7 +176,7 @@ Last model update: **{update_age:.0f} seconds ago** · Page refreshed: **{dateti
 
 `{bar}` **{percent:.2f}%**  
 **Step {step:,} of {max_steps:,}** · Elapsed **{_duration(elapsed)}** · ETA **{_duration(eta_seconds)}**  
-Current speed: **{steps_per_second:.2f} steps/second**
+Current speed: **{steps_per_second:.2f} steps/second** · Stage: **{stage_text}**
 
 ## What the numbers mean
 
@@ -165,6 +187,10 @@ Current speed: **{steps_per_second:.2f} steps/second**
 | Discriminator accuracy | {d_accuracy * 100:.1f}% | Whether the critic is overpowering or underperforming. |
 | Cycle loss | {cycle_loss:.3f} | Lower generally means scene content survives day ↔ night conversion. |
 | Edge loss | {edge_loss:.3f} | Lower generally means roads, cars and building outlines are preserved. |
+| Wavelet detail loss | {wavelet_loss:.3f} | Measures whether fine branches, wires and texture survive the lighting change. |
+| Spatial similarity | {similarity_loss:.3f} | Measures whether local scene relationships remain in the same places. |
+| Refiner change | {residual_loss:.4f} | How strongly V2.1 changes the protected V2 coarse output. |
+| Detail critic accuracy | {hf_accuracy * 100:.1f}% | Whether the high-frequency critic can spot synthetic detail. |
 | Output variance | {output_variance:.4f} | Confirms the model is not producing the same image repeatedly. |
 
 {balance}  
@@ -174,7 +200,7 @@ Current speed: **{steps_per_second:.2f} steps/second**
 
 **Usage {utilization}%** · **VRAM {memory_used}/{memory_total} MiB** · **Temperature {temperature}°C**
 
-_This page refreshes itself every 2 seconds. Model-loss values are written every 25 steps, so they normally change about every 12–18 seconds._
+_This page refreshes itself every 2 seconds. Model-loss values are written every {log_every} steps._
 """
 
 

@@ -26,6 +26,29 @@ illumination critic, and trains the discriminators every second generator update
 python -m daynight.train --config configs/lumicycle_v2.yaml --init-from runs/lumicycle_bdd100k/checkpoints/step_00013000.pt --pilot
 ```
 
+V2.1 is a detail-preserving continuation of the accepted V2 checkpoint. It keeps the
+V2 encoder frozen, starts from `step_00004500.pt`, and zero-initializes a two-level
+Laplacian refiner so its first output is numerically identical to V2. Stage A learns
+only the refiner and Haar-wavelet critics at 256 px; Stage B fine-tunes the refiner,
+V2 residual/decoder layers, and critics at 384 px:
+
+```powershell
+python -m daynight.train --config configs/lumicycle_v2_1.yaml `
+  --init-from runs/lumicycle_v2_bdd100k/checkpoints/step_00004500.pt `
+  --max-hours 8
+```
+
+In a second terminal, point the plain-English live monitor at this run:
+
+```powershell
+$env:LUMICYCLE_RUN_ROOT = "runs/lumicycle_v2_1_bdd100k"
+python monitor.py
+```
+
+The V2.1 checkpoint records the absolute parent path, source step, and SHA-256 digest.
+It does not overwrite any V1 or V2 checkpoints. See [V2_1_IMPLEMENTATION.md](V2_1_IMPLEMENTATION.md)
+for the architecture, training stages, acceptance checks, and recovery commands.
+
 ## What is original in this project?
 
 LumiCycle does not claim that the team invented CycleGAN, attention, DINOv2, or contrastive learning. The project contribution is the tested integration of:

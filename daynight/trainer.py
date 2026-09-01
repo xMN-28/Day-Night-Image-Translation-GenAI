@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import hashlib
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -26,7 +27,10 @@ from .losses import (
     lsgan_generator_loss,
     output_variance,
     patch_nce_loss,
+    refinement_residual_loss,
     regional_illumination_loss,
+    spatial_self_similarity_loss,
+    wavelet_structure_loss,
 )
 from .models import build_models
 from .replay import ImageReplayBuffer
@@ -99,17 +103,23 @@ class Trainer:
         for model in self.models.values():
             model.to(self.device)
         self.generators = [self.models["G_day_night"], self.models["G_night_day"]]
-        self.discriminators = [self.models["D_day"], self.models["D_night"]]
+        self.spatial_discriminators = [self.models["D_day"], self.models["D_night"]]
+        self.frequency_discriminators = [
+            self.models[name] for name in ("D_day_hf", "D_night_hf") if name in self.models
+        ]
+        self.discriminators = [*self.spatial_discriminators, *self.frequency_discriminators]
 
         train_config = config["train"]
+        generator_groups = self._generator_parameter_groups(train_config)
+        discriminator_groups = self._discriminator_parameter_groups(train_config)
         self.optimizers = {
             "G": torch.optim.Adam(
-                [parameter for model in self.generators for parameter in model.parameters()],
+                generator_groups,
                 lr=float(train_config["generator_lr"]),
                 betas=(float(train_config["beta1"]), float(train_config["beta2"])),
             ),
             "D": torch.optim.Adam(
-                [parameter for model in self.discriminators for parameter in model.parameters()],
+                discriminator_groups,
                 lr=float(train_config["discriminator_lr"]),
                 betas=(float(train_config["beta1"]), float(train_config["beta2"])),
             ),
@@ -154,14 +164,14 @@ class Trainer:
             self.train_dataset.day = self.train_dataset.day[:limit]
             self.train_dataset.night = self.train_dataset.night[:limit]
         workers = int(data_config.get("num_workers", 4))
-        self.train_loader = DataLoader(
-            self.train_dataset,
-            batch_size=int(data_config.get("batch_size", 1)),
-            shuffle=True,
-            num_workers=workers,
-            pin_memory=self.device.type == "cuda",
-            persistent_workers=workers > 0,
-        )
+        self.workers = workers
+        self.hard_detail_weights: list[float] | None = None
+        hard_fraction = float(data_config.get("hard_detail_fraction", 0.0))
+        if hard_fraction > 0:
+            self.hard_detail_weights = self.train_dataset.configure_hard_detail_sampling(
+                hard_fraction, Path(data_config["root"]) / "detail_scores.json"
+            )
+        self.train_loader = self._make_train_loader()
         self.val_loader = DataLoader(self.val_dataset, batch_size=1, shuffle=False, num_workers=0)
         self.checkpoints = CheckpointManager(
             self.output_dir, int(train_config.get("keep_checkpoints", 4))
@@ -179,6 +189,96 @@ class Trainer:
             checkpoint_path = self.checkpoints.resolve(resume)
             if checkpoint_path is not None:
                 self.load_checkpoint(checkpoint_path)
+        self._configure_stage(self.step, force=True)
+
+    def _generator_parameter_groups(self, train_config: dict[str, Any]) -> list[dict[str, Any]]:
+        if not bool(self.config["model"].get("detail_refinement", False)):
+            return [{
+                "params": [p for model in self.generators for p in model.parameters()],
+                "name": "generator",
+            }]
+        frozen, trainable, refiners = [], [], []
+        for generator in self.generators:
+            frozen.extend(generator.base.stem.parameters())
+            frozen.extend(generator.base.down1.parameters())
+            frozen.extend(generator.base.down2.parameters())
+            trainable.extend(generator.base.residuals.parameters())
+            trainable.extend(generator.base.up1.parameters())
+            trainable.extend(generator.base.up2.parameters())
+            trainable.extend(generator.base.head.parameters())
+            refiners.extend(generator.refiners.parameters())
+        for parameter in frozen:
+            parameter.requires_grad_(False)
+        return [
+            {"params": trainable, "name": "base", "lr": float(train_config["generator_lr"])},
+            {"params": refiners, "name": "refiner", "lr": float(train_config["generator_lr"])},
+        ]
+
+    def _discriminator_parameter_groups(
+        self, train_config: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        groups = [{
+            "params": [p for model in self.spatial_discriminators for p in model.parameters()],
+            "name": "spatial_d",
+            "lr": float(train_config["discriminator_lr"]),
+        }]
+        if self.frequency_discriminators:
+            groups.append({
+                "params": [p for model in self.frequency_discriminators for p in model.parameters()],
+                "name": "hf_d",
+                "lr": float(train_config["discriminator_lr"]),
+            })
+        return groups
+
+    def _make_train_loader(self) -> DataLoader:
+        data_config = self.config["data"]
+        sampler = None
+        if self.hard_detail_weights is not None:
+            sampler = WeightedRandomSampler(
+                self.hard_detail_weights, len(self.train_dataset), replacement=True
+            )
+        return DataLoader(
+            self.train_dataset,
+            batch_size=int(data_config.get("batch_size", 1)),
+            shuffle=sampler is None,
+            sampler=sampler,
+            num_workers=self.workers,
+            pin_memory=self.device.type == "cuda",
+            persistent_workers=False,
+        )
+
+    def _configure_stage(self, step: int, force: bool = False) -> bool:
+        stages = self.config["train"].get("stages", [])
+        if not stages:
+            return False
+        index = next(
+            (i for i, stage in enumerate(stages) if step < int(stage["until_step"])),
+            len(stages) - 1,
+        )
+        if not force and self.training_state.get("current_stage") == index:
+            return False
+        stage = stages[index]
+        rates = stage["learning_rates"]
+        for optimizer, prefix in ((self.optimizers["G"], "G"), (self.optimizers["D"], "D")):
+            scheduler = self.schedulers[prefix]
+            for group_index, group in enumerate(optimizer.param_groups):
+                rate = float(rates.get(group.get("name"), group["lr"]))
+                group["lr"] = rate
+                scheduler.base_lrs[group_index] = rate
+                enabled = rate > 0
+                for parameter in group["params"]:
+                    parameter.requires_grad_(enabled)
+        image_size = int(stage["image_size"])
+        resize_size = int(stage["resize_size"])
+        self.train_dataset.image_size = image_size
+        self.train_dataset.resize_size = resize_size
+        self.val_dataset.image_size = image_size
+        self.val_dataset.resize_size = resize_size
+        self.train_loader = self._make_train_loader()
+        self.training_state["current_stage"] = index
+        self.training_state["stage_name"] = str(stage["name"])
+        print(f"Training stage: {stage['name']} ({image_size}px, step {step})")
+        return True
 
     @property
     def autocast_context(self):
@@ -224,10 +324,34 @@ class Trainer:
         for name, state in checkpoint["models"].items():
             if name not in names:
                 continue
-            self.models[name].load_state_dict(state)
+            target = self.models.get(name)
+            if target is None:
+                continue
+            if hasattr(target, "base") and not any(key.startswith("base.") for key in state):
+                target.base.load_state_dict(state)
+            else:
+                target.load_state_dict(state)
         for name, state in checkpoint.get("ema", {}).items():
             if name in self.ema:
-                self.ema[name].load_state_dict(state)
+                source_shadow = state["shadow"]
+                target_shadow = self.ema[name].shadow
+                if hasattr(self.models[name], "base") and not any(
+                    key.startswith("base.") for key in source_shadow
+                ):
+                    for key, value in source_shadow.items():
+                        target_shadow[f"base.{key}"] = value.detach().clone()
+                    self.ema[name].decay = float(state["decay"])
+                else:
+                    self.ema[name].load_state_dict(state)
+        digest = hashlib.sha256()
+        with checkpoint_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+                digest.update(chunk)
+        self.training_state["parent_checkpoint"] = {
+            "path": str(checkpoint_path.resolve()),
+            "sha256": digest.hexdigest(),
+            "source_step": int(checkpoint.get("step", 0)),
+        }
         print(
             f"Initialized model weights from {checkpoint_path} "
             f"(source step {int(checkpoint.get('step', 0))}, scope={scope}); "
@@ -253,8 +377,18 @@ class Trainer:
         self, day: torch.Tensor, night: torch.Tensor
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         weights = self.config["loss"]
-        fake_night, day_features = self.models["G_day_night"](day, return_features=True)
-        fake_day, night_features = self.models["G_night_day"](night, return_features=True)
+        if bool(self.config["model"].get("detail_refinement", False)):
+            fake_night, day_features, night_details = self.models["G_day_night"](
+                day, return_features=True, return_details=True
+            )
+            fake_day, night_features, day_details = self.models["G_night_day"](
+                night, return_features=True, return_details=True
+            )
+        else:
+            fake_night, day_features = self.models["G_day_night"](day, return_features=True)
+            fake_day, night_features = self.models["G_night_day"](night, return_features=True)
+            night_details = {"coarse": fake_night}
+            day_details = {"coarse": fake_day}
         reconstructed_day = self.models["G_night_day"](fake_night)
         reconstructed_night = self.models["G_day_night"](fake_day)
         identity_day = self.models["G_night_day"](day)
@@ -272,7 +406,19 @@ class Trainer:
                 day, fake_night, night, "day_to_night"
             )
             + regional_illumination_loss(night, fake_day, day, "night_to_day"),
+            "wavelet": wavelet_structure_loss(day, fake_night)
+            + wavelet_structure_loss(night, fake_day),
+            "self_similarity": spatial_self_similarity_loss(day, fake_night)
+            + spatial_self_similarity_loss(night, fake_day),
+            "residual": refinement_residual_loss(night_details["coarse"], fake_night)
+            + refinement_residual_loss(day_details["coarse"], fake_day),
         }
+        if self.frequency_discriminators:
+            components["frequency_gan"] = lsgan_generator_loss(
+                self.models["D_night_hf"](fake_night)
+            ) + lsgan_generator_loss(self.models["D_day_hf"](fake_day))
+        else:
+            components["frequency_gan"] = day.new_zeros(())
         if float(weights.get("nce", 0)) > 0:
             _, translated_night_features = self.models["G_day_night"].encode_features(fake_night)
             _, translated_day_features = self.models["G_night_day"].encode_features(fake_day)
@@ -296,6 +442,8 @@ class Trainer:
             "night": night,
             "fake_day": fake_day,
             "reconstructed_night": reconstructed_night,
+            "coarse_night": night_details["coarse"],
+            "coarse_day": day_details["coarse"],
         }
         return components, images
 
@@ -308,15 +456,32 @@ class Trainer:
         fake_night_output = self.models["D_night"](diff_augment(fake_night))
         day_loss = lsgan_discriminator_loss(real_day_output, fake_day_output)
         night_loss = lsgan_discriminator_loss(real_night_output, fake_night_output)
+        frequency_loss = images["day"].new_zeros(())
+        frequency_accuracy = images["day"].new_zeros(())
+        if self.frequency_discriminators:
+            real_day_hf = self.models["D_day_hf"](images["day"])
+            fake_day_hf = self.models["D_day_hf"](fake_day)
+            real_night_hf = self.models["D_night_hf"](images["night"])
+            fake_night_hf = self.models["D_night_hf"](fake_night)
+            frequency_loss = lsgan_discriminator_loss(
+                real_day_hf, fake_day_hf
+            ) + lsgan_discriminator_loss(real_night_hf, fake_night_hf)
+            frequency_accuracy = 0.5 * (
+                discriminator_accuracy(real_day_hf, fake_day_hf)
+                + discriminator_accuracy(real_night_hf, fake_night_hf)
+            )
+        frequency_weight = float(self.config["loss"].get("frequency_discriminator", 1.0))
+        spatial_accuracy = 0.5 * (
+            discriminator_accuracy(real_day_output, fake_day_output)
+            + discriminator_accuracy(real_night_output, fake_night_output)
+        )
         return {
-            "total": day_loss + night_loss,
+            "total": day_loss + night_loss + frequency_weight * frequency_loss,
             "day": day_loss,
             "night": night_loss,
-            "accuracy": 0.5
-            * (
-                discriminator_accuracy(real_day_output, fake_day_output)
-                + discriminator_accuracy(real_night_output, fake_night_output)
-            ),
+            "frequency": frequency_loss,
+            "accuracy": spatial_accuracy,
+            "frequency_accuracy": frequency_accuracy,
         }
 
     def _grad_norm(self, modules: list[nn.Module]) -> float:
@@ -327,6 +492,12 @@ class Trainer:
             if parameter.grad is not None
         ]
         return float(torch.stack(norms).norm().item()) if norms else 0.0
+
+    def _enable_discriminator_update_groups(self) -> None:
+        for group in self.optimizers["D"].param_groups:
+            enabled = float(group["lr"]) > 0
+            for parameter in group["params"]:
+                parameter.requires_grad_(enabled)
 
     def train_microstep(
         self, batch: dict[str, Any], should_step: bool
@@ -342,7 +513,7 @@ class Trainer:
             generator_losses, images = self._generator_pass(day, night)
             (generator_losses["total"] / accumulation).backward()
 
-        set_requires_grad(self.discriminators, True)
+        self._enable_discriminator_update_groups()
         with self.autocast_context:
             if update_discriminator:
                 discriminator_losses = self._discriminator_pass(images)
@@ -399,6 +570,8 @@ class Trainer:
             "color": 0.0,
             "illumination": 0.0,
             "variance": 0.0,
+            "wavelet": 0.0,
+            "self_similarity": 0.0,
         }
         count = 0
         try:
@@ -418,10 +591,18 @@ class Trainer:
                     illumination = regional_illumination_loss(
                         day, fake_night, night, "day_to_night"
                     ) + regional_illumination_loss(night, fake_day, day, "night_to_day")
+                    wavelet = wavelet_structure_loss(day, fake_night) + wavelet_structure_loss(
+                        night, fake_day
+                    )
+                    similarity = spatial_self_similarity_loss(
+                        day, fake_night
+                    ) + spatial_self_similarity_loss(night, fake_day)
                 totals["cycle"] += float(cycle.float())
                 totals["edge"] += float(edge.float())
                 totals["color"] += float(color.float())
                 totals["illumination"] += float(illumination.float())
+                totals["wavelet"] += float(wavelet.float())
+                totals["self_similarity"] += float(similarity.float())
                 totals["variance"] += float(
                     0.5 * (output_variance(fake_night) + output_variance(fake_day))
                 )
@@ -443,6 +624,10 @@ class Trainer:
             + 0.25 * metrics["edge"]
             + color_weight * metrics["color"]
             + illumination_weight * metrics["illumination"]
+            + float(self.config["train"].get("validation_wavelet_weight", 0.1))
+            * metrics["wavelet"]
+            + float(self.config["train"].get("validation_similarity_weight", 0.25))
+            * metrics["self_similarity"]
         )
         return metrics
 
@@ -461,6 +646,13 @@ class Trainer:
         self.writer.add_images(
             "translations/day_fake_cycle_night_fake_cycle", (grid + 1) / 2, self.step
         )
+        if "coarse_night" in images:
+            detail_grid = torch.cat(
+                [images["day"], images["coarse_night"], images["fake_night"]], dim=0
+            )
+            self.writer.add_images(
+                "translations/detail_input_coarse_refined", (detail_grid + 1) / 2, self.step
+            )
 
     def _reduce_for_plateau(self) -> bool:
         maximum = int(self.config["train"].get("max_plateau_reductions", 1))
@@ -511,6 +703,9 @@ class Trainer:
             optimizer.zero_grad(set_to_none=True)
         try:
             while self.step < maximum:
+                if self._configure_stage(self.step):
+                    iterator = iter(self.train_loader)
+                    microstep = 0
                 if max_hours and (time.monotonic() - start_time) >= max_hours * 3600:
                     print("Overnight time budget reached; saving a resumable checkpoint.")
                     break
@@ -558,9 +753,10 @@ class Trainer:
                     for name, value in metrics.items():
                         self.writer.add_scalar(name, value, self.step)
                     for name, optimizer in self.optimizers.items():
-                        self.writer.add_scalar(
-                            f"lr/{name}", optimizer.param_groups[0]["lr"], self.step
-                        )
+                        for group in optimizer.param_groups:
+                            self.writer.add_scalar(
+                                f"lr/{group.get('name', name)}", group["lr"], self.step
+                            )
                     if self.device.type == "cuda":
                         self.writer.add_scalar(
                             "health/peak_vram_gb",

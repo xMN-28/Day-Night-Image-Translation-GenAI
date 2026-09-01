@@ -1,5 +1,7 @@
 from .networks import (
     GlobalDiscriminator,
+    HaarWaveletDiscriminator,
+    LaplacianRefinementGenerator,
     LocalGlobalDiscriminator,
     MultiScaleDiscriminator,
     PatchDiscriminator,
@@ -10,6 +12,8 @@ from .networks import (
 
 __all__ = [
     "GlobalDiscriminator",
+    "HaarWaveletDiscriminator",
+    "LaplacianRefinementGenerator",
     "LocalGlobalDiscriminator",
     "MultiScaleDiscriminator",
     "PatchDiscriminator",
