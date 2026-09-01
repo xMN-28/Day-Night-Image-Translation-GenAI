@@ -71,7 +71,7 @@ def _panel(image: Image.Image, label: str, size: tuple[int, int]) -> Image.Image
 def build_comparison(input_path: Path, output_path: Path, maximum_edge: int = 768) -> Path:
     source = ImageOps.exif_transpose(Image.open(input_path)).convert("RGB")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    entries = [("Untouched test input", source)]
+    entries = [("Unmodified difficult input", source)]
     for label, relative_checkpoint in CHECKPOINTS:
         checkpoint = PROJECT_ROOT / relative_checkpoint
         if not checkpoint.exists():
