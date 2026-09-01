@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 
 from daynight.config import load_config
+from daynight.lumirender_losses import paired_perceptual_loss
 from daynight.models import LumiRender, gaussian_blur, linear_to_srgb, srgb_to_linear
 from daynight.models.networks import build_models
 
@@ -46,3 +47,15 @@ def test_lumirender_config_builds_one_generator_and_night_critic() -> None:
     models = build_models(config)
     assert set(models) == {"G_day_night", "D_night"}
     assert isinstance(models["G_day_night"], LumiRender)
+
+
+def test_paired_perceptual_loss_respects_alignment_confidence() -> None:
+    generated = torch.ones(1, 3, 32, 32)
+    target = torch.zeros_like(generated)
+    aligned = torch.ones(1)
+    assert paired_perceptual_loss(
+        generated, target, torch.zeros(1, 1, 32, 32), aligned
+    ).item() == 0
+    assert paired_perceptual_loss(
+        generated, target, torch.ones(1, 1, 32, 32), aligned
+    ).item() > 0

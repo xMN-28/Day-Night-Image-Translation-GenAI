@@ -40,16 +40,23 @@ def confidence_photometric_loss(
 
 
 def paired_perceptual_loss(
-    generated: torch.Tensor, target: torch.Tensor, aligned: torch.Tensor
+    generated: torch.Tensor,
+    target: torch.Tensor,
+    confidence: torch.Tensor,
+    aligned: torch.Tensor,
 ) -> torch.Tensor:
-    mask = aligned.view(-1, 1, 1, 1)
+    mask = confidence * aligned.view(-1, 1, 1, 1)
     losses = []
     generated_level = generated
     target_level = target.detach()
     for _ in range(3):
-        losses.append((F.smooth_l1_loss(generated_level, target_level, reduction="none") * mask).mean())
+        difference = F.smooth_l1_loss(generated_level, target_level, reduction="none")
+        losses.append(
+            (difference * mask).sum() / (mask.sum() * generated.shape[1]).clamp_min(1)
+        )
         generated_level = F.avg_pool2d(generated_level, 2)
         target_level = F.avg_pool2d(target_level, 2)
+        mask = F.avg_pool2d(mask, 2)
     return torch.stack(losses).mean()
 
 

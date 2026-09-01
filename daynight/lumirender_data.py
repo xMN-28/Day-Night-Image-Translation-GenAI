@@ -115,6 +115,19 @@ class LumiRenderDataset(Dataset[dict[str, Any]]):
             )
             return self._add_pseudo(sample)
         item = self.pairs[index % len(self.pairs)]
+        if not bool(item.get("paired", True)):
+            sample = self.bdd[index % len(self.bdd)]
+            night_path = self._resolve(item, "night_path")
+            sample.update(
+                {
+                    "night": self._transform(night_path),
+                    "night_path": str(night_path),
+                    "aligned": torch.tensor(0.0),
+                    "pair_confidence": torch.zeros(1, self.image_size, self.image_size),
+                    "source_name": str(item.get("source", "external_unpaired")),
+                }
+            )
+            return self._add_pseudo(sample)
         day_path = self._resolve(item, "day_path")
         night_path = self._resolve(item, "night_path")
         confidence = float(item.get("confidence", 1.0))

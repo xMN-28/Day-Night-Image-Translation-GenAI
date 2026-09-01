@@ -42,11 +42,25 @@ python -m daynight.prepare_teacher_targets --data-root data/bdd100k_daynight
 python -m daynight.night_classifier --data-root data/bdd100k_daynight
 ```
 
-Licensed ACDC/Dark Zurich pairs are aligned and registered without copying them into Git:
+Large datasets stay outside Git. KaggleHub is the reliable downloader for public Kaggle copies;
+set its cache to drive D so the system disk is not filled:
 
 ```powershell
-python -m daynight.align_lumirender_pairs --pairs-csv D:\datasets\acdc\pairs.csv --output data\aligned\acdc
-python -m daynight.prepare_lumirender_data --pairs-csv data\aligned\acdc\aligned_pairs.csv --source acdc
+$env:KAGGLEHUB_CACHE="D:\datasets\kagglehub"
+python -m pip install -e ".[datasets,teachers]"
+python -c "import kagglehub; kagglehub.dataset_download('khalilusmanuk/acdc-clean-dataset-for-training')"
+python -c "import kagglehub; kagglehub.dataset_download('stevemark/daynight-dataset')"
+```
+
+Kaggle's cleaned ACDC copy omits the official normal-condition references, so it is registered
+honestly as unpaired real-night data. Dark Zurich provides the confidence-aligned paired supervision:
+
+```powershell
+python -m daynight.prepare_acdc_kaggle --acdc-root D:\datasets\kagglehub\datasets\khalilusmanuk\acdc-clean-dataset-for-training\versions\1
+python -m daynight.prepare_dark_zurich --dark-zurich-root D:\datasets\lumirender\Dark_Zurich_train_anon --split train --output D:\datasets\lumirender\dark_zurich_train_pairs.csv
+python -m daynight.align_lumirender_pairs --pairs-csv D:\datasets\lumirender\dark_zurich_train_pairs.csv --output D:\datasets\lumirender\aligned\dark_zurich
+python -m daynight.prepare_lumirender_data --pairs-csv D:\datasets\lumirender\aligned\dark_zurich\aligned_pairs.csv --source dark_zurich
+python -m daynight.prepare_amos --amos-root D:\datasets\kagglehub\datasets\stevemark\daynight-dataset\versions\1 --output D:\datasets\lumirender\amos_pairs.csv
 ```
 
 Run the strict preflight after registering sources. It refuses to start the factorization stage without teacher targets and refuses to enter correspondence training without licensed pairs:

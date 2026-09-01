@@ -192,7 +192,7 @@ class LumiRenderTrainer:
                 else day.new_zeros(())
             ),
             "perceptual": (
-                paired_perceptual_loss(generated, night, aligned)
+                paired_perceptual_loss(generated, night, confidence, aligned)
                 if weights.get("perceptual", 0) > 0
                 else day.new_zeros(())
             ),
