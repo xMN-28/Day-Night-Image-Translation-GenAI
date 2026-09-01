@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import random
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -31,9 +33,22 @@ def atomic_torch_save(payload: Any, destination: str | Path) -> None:
 def atomic_json_dump(payload: Any, destination: str | Path) -> None:
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    temporary = destination.with_name(
+        f".{destination.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
     temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    os.replace(temporary, destination)
+    try:
+        for attempt in range(12):
+            try:
+                os.replace(temporary, destination)
+                return
+            except PermissionError:
+                if attempt == 11:
+                    raise
+                # Windows may briefly lock a JSON file while the UI reads it.
+                time.sleep(0.01 * (attempt + 1))
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def tensor_to_pil(tensor: torch.Tensor) -> Image.Image:

@@ -352,18 +352,22 @@ class LumiRenderTrainer:
         message: str | None = None,
     ) -> None:
         stage = self.config["train"]["stages"][self._stage_index()]["name"]
-        atomic_json_dump(
-            {
-                "state": state,
-                "step": self.step,
-                "stage": stage,
-                "metrics": metrics or {},
-                "checkpoint": str(checkpoint.resolve()) if checkpoint else None,
-                "message": message,
-                "updated_at": time.time(),
-            },
-            self.status_path,
-        )
+        try:
+            atomic_json_dump(
+                {
+                    "state": state,
+                    "step": self.step,
+                    "stage": stage,
+                    "metrics": metrics or {},
+                    "checkpoint": str(checkpoint.resolve()) if checkpoint else None,
+                    "message": message,
+                    "updated_at": time.time(),
+                },
+                self.status_path,
+            )
+        except OSError as error:
+            # Telemetry must never interrupt or roll back model training.
+            print(f"Status update skipped: {error}", flush=True)
 
     def load_checkpoint(self, path: str | Path) -> None:
         payload = torch.load(path, map_location=self.device, weights_only=False)
@@ -442,7 +446,10 @@ class LumiRenderTrainer:
                         if name in {"total", "gan", "aligned_photometric", "health/peak_vram_gb"}
                     )
                     print(f"step={self.step} stage={stage_name} {useful}", flush=True)
-                self.write_status("running", metrics)
+                # Ten-step updates are effectively real-time at this throughput
+                # and avoid racing the dashboard's Windows file reader.
+                if self.step % max(1, min(log_every, 10)) == 0:
+                    self.write_status("running", metrics)
                 if self.step % validate_every == 0:
                     validation = self.validate()
                     for name, value in validation.items():
