@@ -19,6 +19,7 @@ from .data import UnpairedDayNightDataset
 from .losses import (
     DinoSemanticLoss,
     SobelEdgeLoss,
+    color_statistics_loss,
     diff_augment,
     discriminator_accuracy,
     lsgan_discriminator_loss,
@@ -79,7 +80,12 @@ def make_scheduler(optimizer: torch.optim.Optimizer, config: dict[str, Any]):
 
 
 class Trainer:
-    def __init__(self, config: dict[str, Any], resume: str | None = "auto") -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        resume: str | None = "auto",
+        init_from: str | Path | None = None,
+    ) -> None:
         self.config = config
         seed_everything(int(config["experiment"].get("seed", 42)))
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -166,9 +172,12 @@ class Trainer:
             "plateau_reductions": 0,
             "recoveries": 0,
         }
-        checkpoint_path = self.checkpoints.resolve(resume)
-        if checkpoint_path is not None:
-            self.load_checkpoint(checkpoint_path)
+        if init_from is not None:
+            self.initialize_weights(init_from)
+        else:
+            checkpoint_path = self.checkpoints.resolve(resume)
+            if checkpoint_path is not None:
+                self.load_checkpoint(checkpoint_path)
 
     @property
     def autocast_context(self):
@@ -198,6 +207,22 @@ class Trainer:
         self.step = int(checkpoint["step"])
         restore_rng_state(checkpoint["rng"])
         print(f"Resumed from {path} at step {self.step}")
+
+    def initialize_weights(self, path: str | Path) -> None:
+        """Load learned weights while keeping fresh optimizers and counters."""
+        checkpoint_path = Path(path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        for name, state in checkpoint["models"].items():
+            self.models[name].load_state_dict(state)
+        for name, state in checkpoint.get("ema", {}).items():
+            if name in self.ema:
+                self.ema[name].load_state_dict(state)
+        print(
+            f"Initialized model weights from {checkpoint_path} "
+            f"(source step {int(checkpoint.get('step', 0))}); optimizers start fresh."
+        )
 
     def checkpoint_payload(self) -> dict[str, Any]:
         return build_checkpoint(
@@ -231,6 +256,8 @@ class Trainer:
             "cycle": F.l1_loss(reconstructed_day, day) + F.l1_loss(reconstructed_night, night),
             "identity": F.l1_loss(identity_day, day) + F.l1_loss(identity_night, night),
             "edge": self.edge_loss(day, fake_night) + self.edge_loss(night, fake_day),
+            "color": color_statistics_loss(fake_night, night)
+            + color_statistics_loss(fake_day, day),
         }
         if float(weights.get("nce", 0)) > 0:
             _, translated_night_features = self.models["G_day_night"].encode_features(fake_night)
@@ -344,7 +371,7 @@ class Trainer:
             originals[name] = ema.copy_to(self.models[name])
         for model in self.models.values():
             model.eval()
-        totals = {"cycle": 0.0, "edge": 0.0, "variance": 0.0}
+        totals = {"cycle": 0.0, "edge": 0.0, "color": 0.0, "variance": 0.0}
         count = 0
         try:
             for batch in self.val_loader:
@@ -357,8 +384,12 @@ class Trainer:
                         self.models["G_day_night"](fake_day), night
                     )
                     edge = self.edge_loss(day, fake_night) + self.edge_loss(night, fake_day)
+                    color = color_statistics_loss(fake_night, night) + color_statistics_loss(
+                        fake_day, day
+                    )
                 totals["cycle"] += float(cycle.float())
                 totals["edge"] += float(edge.float())
+                totals["color"] += float(color.float())
                 totals["variance"] += float(
                     0.5 * (output_variance(fake_night) + output_variance(fake_day))
                 )
@@ -371,7 +402,10 @@ class Trainer:
             for model in self.models.values():
                 model.train()
         metrics = {name: value / max(1, count) for name, value in totals.items()}
-        metrics["score"] = metrics["cycle"] + 0.25 * metrics["edge"]
+        color_weight = float(self.config["train"].get("validation_color_weight", 0.0))
+        metrics["score"] = (
+            metrics["cycle"] + 0.25 * metrics["edge"] + color_weight * metrics["color"]
+        )
         return metrics
 
     def _log_images(self, images: dict[str, torch.Tensor]) -> None:
@@ -390,7 +424,11 @@ class Trainer:
             "translations/day_fake_cycle_night_fake_cycle", (grid + 1) / 2, self.step
         )
 
-    def _reduce_for_plateau(self) -> None:
+    def _reduce_for_plateau(self) -> bool:
+        maximum = int(self.config["train"].get("max_plateau_reductions", 1))
+        if int(self.training_state["plateau_reductions"]) >= maximum:
+            print("Validation plateau persists; the configured LR-reduction limit is reached.")
+            return False
         for optimizer in self.optimizers.values():
             for group in optimizer.param_groups:
                 group["lr"] *= 0.5
@@ -399,6 +437,7 @@ class Trainer:
         self.training_state["plateau_reductions"] += 1
         self.training_state["bad_validations"] = 0
         print("Validation plateau detected: learning rates reduced by 50%.")
+        return True
 
     def _restore_best_weights(self) -> None:
         best_path = self.checkpoints.resolve_best()
@@ -505,7 +544,15 @@ class Trainer:
                     collapsed = validation["variance"] < 1e-4
                     saturated = metrics.get("D/accuracy", 0.0) > 0.985
                     patience = int(self.config["train"].get("plateau_patience", 4))
-                    if collapsed or saturated or self.training_state["bad_validations"] >= patience:
+                    needs_recovery = (
+                        collapsed
+                        or saturated
+                        or self.training_state["bad_validations"] >= patience
+                    )
+                    reductions_available = int(
+                        self.training_state["plateau_reductions"]
+                    ) < int(self.config["train"].get("max_plateau_reductions", 1))
+                    if needs_recovery and reductions_available:
                         atomic_json_dump(
                             {
                                 "step": self.step,

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from daynight.losses import SobelEdgeLoss, lsgan_discriminator_loss, patch_nce_loss
+from daynight.losses import (
+    SobelEdgeLoss,
+    color_statistics_loss,
+    lsgan_discriminator_loss,
+    patch_nce_loss,
+)
 from daynight.models.networks import MultiScaleDiscriminator, PatchDiscriminator, ResnetGenerator
 
 
@@ -29,3 +34,16 @@ def test_all_losses_are_finite_and_differentiable() -> None:
     assert torch.isfinite(total)
     total.backward()
     assert source.grad is not None
+
+
+def test_color_statistics_loss_is_differentiable_and_domain_sensitive() -> None:
+    generated = torch.zeros(1, 3, 16, 16, requires_grad=True)
+    matching_target = torch.zeros_like(generated)
+    darker_target = torch.full_like(generated, -0.8)
+    matching = color_statistics_loss(generated, matching_target)
+    different = color_statistics_loss(generated, darker_target)
+    assert matching.item() == 0.0
+    assert different.item() > matching.item()
+    different.backward()
+    assert generated.grad is not None
+    assert torch.isfinite(generated.grad).all()

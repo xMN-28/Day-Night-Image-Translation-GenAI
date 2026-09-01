@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 from daynight.trainer import Trainer
@@ -61,3 +62,17 @@ def test_one_step_training_and_resume(tiny_dataset: Path, tmp_path: Path) -> Non
     actual = next(resumed.models["G_day_night"].parameters()).detach().cpu()
     assert actual.equal(expected)
     resumed.writer.close()
+
+    fine_tune_config = deepcopy(config)
+    fine_tune_config["experiment"]["output_dir"] = str(tmp_path / "fine-tune")
+    initialized = Trainer(
+        fine_tune_config,
+        resume="none",
+        init_from=output / "checkpoints" / "step_00000001.pt",
+    )
+    assert initialized.step == 0
+    initialized_weight = (
+        next(initialized.models["G_day_night"].parameters()).detach().cpu()
+    )
+    assert initialized_weight.equal(expected)
+    initialized.writer.close()

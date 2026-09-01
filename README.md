@@ -13,6 +13,12 @@ The implementation is based on the supplied 2025 IEEE paper *Unpaired Day-to-Nig
 
 The first complete 40,000-step run selected step 13,000 as its best validation checkpoint. See [PROJECT_PROCESS.md](PROJECT_PROCESS.md) for the full build diary, actual timings, results, plateau analysis, and exact reproduction commands.
 
+Phase-two fine-tuning starts from those best weights but resets the exhausted optimizer state:
+
+```powershell
+python -m daynight.train --config configs/lumicycle_phase2.yaml --init-from runs/lumicycle_bdd100k/checkpoints/step_00013000.pt --max-hours 8
+```
+
 ## What is original in this project?
 
 LumiCycle does not claim that the team invented CycleGAN, attention, DINOv2, or contrastive learning. The project contribution is the tested integration of:

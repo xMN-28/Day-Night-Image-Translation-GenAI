@@ -127,3 +127,25 @@ def diff_augment(image: torch.Tensor, enabled: bool = True) -> torch.Tensor:
 
 def output_variance(image: torch.Tensor) -> torch.Tensor:
     return image.detach().float().var(dim=(0, 2, 3)).mean()
+
+
+def color_statistics_loss(generated: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Match unpaired target illumination without comparing unrelated pixels."""
+    generated_01 = (generated + 1) / 2
+    target_01 = ((target.detach() + 1) / 2).to(generated_01.dtype)
+
+    def statistics(image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        rgb_mean = image.mean(dim=(2, 3))
+        rgb_std = image.std(dim=(2, 3), unbiased=False)
+        luminance = (
+            0.299 * image[:, 0:1] + 0.587 * image[:, 1:2] + 0.114 * image[:, 2:3]
+        )
+        luminance_mean = luminance.mean(dim=(2, 3))
+        luminance_std = luminance.std(dim=(2, 3), unbiased=False)
+        return torch.cat((rgb_mean, luminance_mean), dim=1), torch.cat(
+            (rgb_std, luminance_std), dim=1
+        )
+
+    generated_mean, generated_std = statistics(generated_01)
+    target_mean, target_std = statistics(target_01)
+    return F.l1_loss(generated_mean, target_mean) + F.l1_loss(generated_std, target_std)

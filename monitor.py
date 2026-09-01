@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -9,7 +10,7 @@ from pathlib import Path
 import gradio as gr
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-RUN_ROOT = Path("runs/lumicycle_bdd100k")
+RUN_ROOT = Path(os.getenv("LUMICYCLE_RUN_ROOT", "runs/lumicycle_bdd100k"))
 EVENT_ROOT = RUN_ROOT / "tensorboard"
 _event_path: Path | None = None
 _events: EventAccumulator | None = None

@@ -174,6 +174,13 @@ Open `http://127.0.0.1:7861`. TensorBoard remains available for detailed charts:
 tensorboard --logdir runs --port 6006
 ```
 
+To monitor the isolated phase-two pilot, set its run directory before launching:
+
+```powershell
+$env:LUMICYCLE_RUN_ROOT = "runs/pilots/lumicycle_phase2_bdd100k"
+python monitor.py
+```
+
 ### Test the model
 
 ```powershell

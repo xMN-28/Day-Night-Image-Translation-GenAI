@@ -15,6 +15,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-hours", type=float, default=None, help="Stop cleanly after this many hours"
     )
     parser.add_argument("--resume", default="auto", help="auto, none, or a checkpoint path")
+    parser.add_argument(
+        "--init-from",
+        default=None,
+        help="Load model/EMA weights from a checkpoint but start fresh optimizers at step zero",
+    )
     parser.add_argument("--save-every", type=int, default=None, help="Override checkpoint interval")
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--pilot", action="store_true", help="Run an isolated 2,000-step pilot")
@@ -26,6 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.init_from is not None and args.resume not in {"auto", "none"}:
+        raise SystemExit("--init-from cannot be combined with an explicit --resume checkpoint")
     config = load_config(args.config)
     if args.save_every is not None:
         config["train"]["save_every"] = args.save_every
@@ -38,7 +45,8 @@ def main() -> None:
         config["data"]["limit"] = 32
         config["train"]["max_steps"] = min(1000, int(config["train"]["max_steps"]))
         config["experiment"]["output_dir"] = f"runs/overfit/{config['experiment']['name']}"
-    Trainer(config, resume=args.resume).run(max_hours=args.max_hours)
+    resume = "none" if args.init_from is not None else args.resume
+    Trainer(config, resume=resume, init_from=args.init_from).run(max_hours=args.max_hours)
 
 
 if __name__ == "__main__":
