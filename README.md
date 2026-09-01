@@ -324,6 +324,15 @@ python -m daynight.evaluate --checkpoint runs\lumicycle_bdd100k\checkpoints
 python app.py
 ```
 
+To preview a newly trained LumiRender checkpoint before it passes the formal acceptance gate,
+launch PowerShell with an explicit checkpoint (the UI labels this as experimental):
+
+```powershell
+$env:LUMIRENDER_EXPERIMENTAL = "1"
+$env:LUMIRENDER_CHECKPOINT = "runs\lumirender_physics_bdd100k\checkpoints\step_00034004.pt"
+python app.py
+```
+
 Public Python API:
 
 ```python

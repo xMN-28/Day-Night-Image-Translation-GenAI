@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import gradio as gr
@@ -25,7 +26,11 @@ CSS = """
 def _model_choices() -> list[str]:
     choices = ["LumiCycle V2", "LumiCycle", "CycleGAN", "Turbo reference"]
     acceptance = Path("runs/lumirender_physics_bdd100k/acceptance.json")
-    if acceptance.exists() and json.loads(acceptance.read_text(encoding="utf-8")).get("passed"):
+    accepted = acceptance.exists() and json.loads(
+        acceptance.read_text(encoding="utf-8")
+    ).get("passed")
+    experimental = os.getenv("LUMIRENDER_EXPERIMENTAL") == "1"
+    if accepted or experimental:
         choices.insert(0, "LumiRender")
     return choices
 
@@ -132,7 +137,9 @@ def build_app() -> gr.Blocks:
         )
         clear.add([input_image, output_image, slider, status])
         gr.Markdown(
-            "**Academic note:** LumiCycle and CycleGAN are locally trained project models. The optional Turbo reference is clearly separated and attributed."
+            "**Academic note:** LumiRender is available here as an experimental checkpoint preview "
+            "until its acceptance suite is complete. LumiCycle and CycleGAN are locally trained "
+            "project models; Turbo is an externally pretrained reference."
         )
     return demo
 
