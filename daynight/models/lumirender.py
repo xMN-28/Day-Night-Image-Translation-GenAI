@@ -20,10 +20,14 @@ def srgb_to_linear(image: torch.Tensor) -> torch.Tensor:
 
 def linear_to_srgb(image: torch.Tensor) -> torch.Tensor:
     image = image.clamp_min(0)
+    # torch.where evaluates both branches.  Keeping the fractional-power branch
+    # away from zero prevents an infinite derivative (and 0 * inf -> NaN in
+    # backward) even for pixels that use the linear branch.
+    power_input = image.clamp_min(0.0031308)
     return torch.where(
         image <= 0.0031308,
         image * 12.92,
-        1.055 * image.pow(1 / 2.4) - 0.055,
+        1.055 * power_input.pow(1 / 2.4) - 0.055,
     ).clamp(0, 1)
 
 
@@ -299,7 +303,9 @@ class LumiRender(nn.Module):
         grid_x, grid_y = self._meshgrid(radiance)
         radius = ((grid_x - 0.5).square() + (grid_y - 0.5).square()).clamp(0, 0.5)
         radiance = radiance * (1 - 0.28 * radius)
-        shot = lights.noise[:, 0:1, None, None] * radiance.clamp_min(0).sqrt()
+        # A zero-radiance square root has an infinite derivative. The epsilon is
+        # far below a visible signal but keeps adversarial/perceptual gradients finite.
+        shot = lights.noise[:, 0:1, None, None] * radiance.clamp_min(1e-6).sqrt()
         read = lights.noise[:, 1:2, None, None]
         radiance = radiance + noise_sample * (shot + read)
         tone_mapped = radiance.clamp_min(0) / (1 + radiance.clamp_min(0))
