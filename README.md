@@ -80,6 +80,9 @@ Blind the model labels in the exported comparison gallery and collect a team CSV
 Run a 500-step low-risk pilot, then resume multi-night training:
 
 ```powershell
+./scripts/start_lumirender_tonight.ps1 -Hours 8
+
+# Or run the two stages manually:
 python -m daynight.train_lumirender --config configs/lumirender.yaml --pilot
 python -m daynight.train_lumirender --config configs/lumirender.yaml --max-hours 8 --resume auto
 ```
