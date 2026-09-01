@@ -10,7 +10,18 @@ from pathlib import Path
 import gradio as gr
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-RUN_ROOT = Path(os.getenv("LUMICYCLE_RUN_ROOT", "runs/lumicycle_bdd100k"))
+
+def _newest_run() -> Path:
+    configured = os.getenv("LUMICYCLE_RUN_ROOT")
+    if configured:
+        return Path(configured)
+    event_files = list(Path("runs").glob("**/tensorboard/events.out.tfevents.*"))
+    if event_files:
+        return max(event_files, key=lambda path: path.stat().st_mtime).parent.parent
+    return Path("runs/lumicycle_bdd100k")
+
+
+RUN_ROOT = _newest_run()
 EVENT_ROOT = RUN_ROOT / "tensorboard"
 _event_path: Path | None = None
 _events: EventAccumulator | None = None
