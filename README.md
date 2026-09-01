@@ -19,6 +19,13 @@ Phase-two fine-tuning starts from those best weights but resets the exhausted op
 python -m daynight.train --config configs/lumicycle_phase2.yaml --init-from runs/lumicycle_bdd100k/checkpoints/step_00013000.pt --max-hours 8
 ```
 
+The sky-aware V2 experiment also resets the saturated critics, adds a whole-image
+illumination critic, and trains the discriminators every second generator update:
+
+```powershell
+python -m daynight.train --config configs/lumicycle_v2.yaml --init-from runs/lumicycle_bdd100k/checkpoints/step_00013000.pt --pilot
+```
+
 ## What is original in this project?
 
 LumiCycle does not claim that the team invented CycleGAN, attention, DINOv2, or contrastive learning. The project contribution is the tested integration of:

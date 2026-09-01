@@ -1,0 +1,51 @@
+experiment:
+  name: lumicycle_v2_bdd100k
+  seed: 44
+  output_dir: runs/lumicycle_v2_bdd100k
+data:
+  root: data/bdd100k_daynight
+  image_size: 256
+  resize_size: 286
+  num_workers: 4
+  batch_size: 1
+model:
+  kind: lumicycle
+  generator_blocks: 9
+  base_channels: 64
+  attention: true
+  multiscale_discriminator: true
+  global_discriminator: true
+loss:
+  gan: 1.0
+  cycle: 10.0
+  identity: 2.0
+  nce: 1.0
+  semantic: 0.75
+  edge: 2.5
+  color: 0.5
+  illumination: 2.0
+train:
+  max_steps: 12000
+  gradient_accumulation: 2
+  generator_lr: 0.00005
+  discriminator_lr: 0.000025
+  discriminator_every: 2
+  beta1: 0.5
+  beta2: 0.999
+  warmup_steps: 250
+  decay_start_step: 8000
+  grad_clip: 5.0
+  amp: bf16
+  replay_size: 50
+  ema_decay: 0.999
+  diffaugment: true
+  log_every: 25
+  image_every: 500
+  validate_every: 500
+  save_every: 500
+  keep_checkpoints: 5
+  plateau_patience: 4
+  max_plateau_reductions: 1
+  validation_color_weight: 0.15
+  validation_illumination_weight: 0.5
+  init_scope: generators

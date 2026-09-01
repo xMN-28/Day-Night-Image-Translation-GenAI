@@ -1,4 +1,6 @@
 from .networks import (
+    GlobalDiscriminator,
+    LocalGlobalDiscriminator,
     MultiScaleDiscriminator,
     PatchDiscriminator,
     ResnetGenerator,
@@ -7,6 +9,8 @@ from .networks import (
 )
 
 __all__ = [
+    "GlobalDiscriminator",
+    "LocalGlobalDiscriminator",
     "MultiScaleDiscriminator",
     "PatchDiscriminator",
     "ResnetGenerator",

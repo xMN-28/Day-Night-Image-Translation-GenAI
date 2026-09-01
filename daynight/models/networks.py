@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from itertools import pairwise
 
 import torch
 from torch import nn
@@ -185,6 +186,39 @@ class MultiScaleDiscriminator(nn.Module):
         return outputs
 
 
+class GlobalDiscriminator(nn.Module):
+    """Whole-frame critic for coherent illumination, complementing PatchGAN."""
+
+    def __init__(self, base_channels: int = 64) -> None:
+        super().__init__()
+        channels = [3, base_channels, base_channels * 2, base_channels * 4, base_channels * 8]
+        layers: list[nn.Module] = []
+        for index, (input_channels, output_channels) in enumerate(pairwise(channels)):
+            layers.append(
+                spectral_norm(
+                    nn.Conv2d(input_channels, output_channels, 4, stride=2, padding=1)
+                )
+            )
+            if index:
+                layers.append(nn.InstanceNorm2d(output_channels))
+            layers.append(nn.LeakyReLU(0.2, inplace=True))
+        self.features = nn.Sequential(*layers)
+        self.head = spectral_norm(nn.Conv2d(channels[-1], 1, 1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(nn.functional.adaptive_avg_pool2d(self.features(x), 1))
+
+
+class LocalGlobalDiscriminator(nn.Module):
+    def __init__(self, base_channels: int = 64, scales: int = 2) -> None:
+        super().__init__()
+        self.local = MultiScaleDiscriminator(base_channels, scales)
+        self.global_critic = GlobalDiscriminator(base_channels)
+
+    def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
+        return [*self.local(x), self.global_critic(x)]
+
+
 def init_weights(module: nn.Module) -> None:
     classname = module.__class__.__name__
     if hasattr(module, "weight") and ("Conv" in classname or "Linear" in classname):
@@ -200,10 +234,14 @@ def build_models(config: dict) -> dict[str, nn.Module]:
     blocks = int(model_config.get("generator_blocks", 9))
     attention = bool(model_config.get("attention", False))
     multiscale = bool(model_config.get("multiscale_discriminator", False))
+    global_discriminator = bool(model_config.get("global_discriminator", False))
 
     generator_day_to_night = ResnetGenerator(base, blocks, attention)
     generator_night_to_day = ResnetGenerator(base, blocks, attention)
-    discriminator_class = MultiScaleDiscriminator if multiscale else PatchDiscriminator
+    if global_discriminator:
+        discriminator_class = LocalGlobalDiscriminator
+    else:
+        discriminator_class = MultiScaleDiscriminator if multiscale else PatchDiscriminator
     discriminator_day = discriminator_class(base)
     discriminator_night = discriminator_class(base)
     models = {

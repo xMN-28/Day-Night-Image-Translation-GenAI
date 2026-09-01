@@ -26,6 +26,7 @@ from .losses import (
     lsgan_generator_loss,
     output_variance,
     patch_nce_loss,
+    regional_illumination_loss,
 )
 from .models import build_models
 from .replay import ImageReplayBuffer
@@ -214,14 +215,23 @@ class Trainer:
         if not checkpoint_path.exists():
             raise FileNotFoundError(checkpoint_path)
         checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        scope = str(self.config["train"].get("init_scope", "all"))
+        names = (
+            {"G_day_night", "G_night_day"}
+            if scope == "generators"
+            else set(checkpoint["models"])
+        )
         for name, state in checkpoint["models"].items():
+            if name not in names:
+                continue
             self.models[name].load_state_dict(state)
         for name, state in checkpoint.get("ema", {}).items():
             if name in self.ema:
                 self.ema[name].load_state_dict(state)
         print(
             f"Initialized model weights from {checkpoint_path} "
-            f"(source step {int(checkpoint.get('step', 0))}); optimizers start fresh."
+            f"(source step {int(checkpoint.get('step', 0))}, scope={scope}); "
+            "optimizers start fresh."
         )
 
     def checkpoint_payload(self) -> dict[str, Any]:
@@ -258,6 +268,10 @@ class Trainer:
             "edge": self.edge_loss(day, fake_night) + self.edge_loss(night, fake_day),
             "color": color_statistics_loss(fake_night, night)
             + color_statistics_loss(fake_day, day),
+            "illumination": regional_illumination_loss(
+                day, fake_night, night, "day_to_night"
+            )
+            + regional_illumination_loss(night, fake_day, day, "night_to_day"),
         }
         if float(weights.get("nce", 0)) > 0:
             _, translated_night_features = self.models["G_day_night"].encode_features(fake_night)
@@ -320,6 +334,8 @@ class Trainer:
         day = batch["day"].to(self.device, non_blocking=True)
         night = batch["night"].to(self.device, non_blocking=True)
         accumulation = int(self.config["train"].get("gradient_accumulation", 1))
+        discriminator_every = int(self.config["train"].get("discriminator_every", 1))
+        update_discriminator = (self.step + 1) % max(1, discriminator_every) == 0
 
         set_requires_grad(self.discriminators, False)
         with self.autocast_context:
@@ -328,8 +344,12 @@ class Trainer:
 
         set_requires_grad(self.discriminators, True)
         with self.autocast_context:
-            discriminator_losses = self._discriminator_pass(images)
-            (discriminator_losses["total"] / accumulation).backward()
+            if update_discriminator:
+                discriminator_losses = self._discriminator_pass(images)
+                (discriminator_losses["total"] / accumulation).backward()
+            else:
+                with torch.no_grad():
+                    discriminator_losses = self._discriminator_pass(images)
 
         metrics = {
             f"G/{name}": float(value.detach().float()) for name, value in generator_losses.items()
@@ -355,11 +375,13 @@ class Trainer:
                 [parameter for module in self.discriminators for parameter in module.parameters()],
                 max_norm,
             )
-            for optimizer in self.optimizers.values():
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            for scheduler in self.schedulers.values():
-                scheduler.step()
+            self.optimizers["G"].step()
+            self.optimizers["G"].zero_grad(set_to_none=True)
+            self.schedulers["G"].step()
+            if update_discriminator:
+                self.optimizers["D"].step()
+                self.schedulers["D"].step()
+            self.optimizers["D"].zero_grad(set_to_none=True)
             for name, ema in self.ema.items():
                 ema.update(self.models[name])
         return metrics, images
@@ -371,7 +393,13 @@ class Trainer:
             originals[name] = ema.copy_to(self.models[name])
         for model in self.models.values():
             model.eval()
-        totals = {"cycle": 0.0, "edge": 0.0, "color": 0.0, "variance": 0.0}
+        totals = {
+            "cycle": 0.0,
+            "edge": 0.0,
+            "color": 0.0,
+            "illumination": 0.0,
+            "variance": 0.0,
+        }
         count = 0
         try:
             for batch in self.val_loader:
@@ -387,9 +415,13 @@ class Trainer:
                     color = color_statistics_loss(fake_night, night) + color_statistics_loss(
                         fake_day, day
                     )
+                    illumination = regional_illumination_loss(
+                        day, fake_night, night, "day_to_night"
+                    ) + regional_illumination_loss(night, fake_day, day, "night_to_day")
                 totals["cycle"] += float(cycle.float())
                 totals["edge"] += float(edge.float())
                 totals["color"] += float(color.float())
+                totals["illumination"] += float(illumination.float())
                 totals["variance"] += float(
                     0.5 * (output_variance(fake_night) + output_variance(fake_day))
                 )
@@ -403,8 +435,14 @@ class Trainer:
                 model.train()
         metrics = {name: value / max(1, count) for name, value in totals.items()}
         color_weight = float(self.config["train"].get("validation_color_weight", 0.0))
+        illumination_weight = float(
+            self.config["train"].get("validation_illumination_weight", 0.0)
+        )
         metrics["score"] = (
-            metrics["cycle"] + 0.25 * metrics["edge"] + color_weight * metrics["color"]
+            metrics["cycle"]
+            + 0.25 * metrics["edge"]
+            + color_weight * metrics["color"]
+            + illumination_weight * metrics["illumination"]
         )
         return metrics
 

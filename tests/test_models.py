@@ -7,8 +7,14 @@ from daynight.losses import (
     color_statistics_loss,
     lsgan_discriminator_loss,
     patch_nce_loss,
+    regional_illumination_loss,
 )
-from daynight.models.networks import MultiScaleDiscriminator, PatchDiscriminator, ResnetGenerator
+from daynight.models.networks import (
+    LocalGlobalDiscriminator,
+    MultiScaleDiscriminator,
+    PatchDiscriminator,
+    ResnetGenerator,
+)
 
 
 def test_generators_and_discriminators_have_expected_shapes() -> None:
@@ -20,6 +26,9 @@ def test_generators_and_discriminators_have_expected_shapes() -> None:
     assert PatchDiscriminator(8)(translated).shape[1] == 1
     outputs = MultiScaleDiscriminator(8)(translated)
     assert len(outputs) == 2
+    local_global_outputs = LocalGlobalDiscriminator(8)(translated)
+    assert len(local_global_outputs) == 3
+    assert local_global_outputs[-1].shape == (1, 1, 1, 1)
 
 
 def test_all_losses_are_finite_and_differentiable() -> None:
@@ -47,3 +56,15 @@ def test_color_statistics_loss_is_differentiable_and_domain_sensitive() -> None:
     different.backward()
     assert generated.grad is not None
     assert torch.isfinite(generated.grad).all()
+
+
+def test_regional_illumination_targets_bright_upper_scene() -> None:
+    source = torch.full((1, 3, 32, 32), -0.2)
+    source[:, :, :16] = 1.0
+    generated = source.clone().requires_grad_(True)
+    target_night = torch.full_like(source, -0.7)
+    loss = regional_illumination_loss(source, generated, target_night, "day_to_night")
+    assert loss.item() > 0
+    loss.backward()
+    assert generated.grad is not None
+    assert generated.grad[:, :, :16].abs().sum() > 0

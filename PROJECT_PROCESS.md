@@ -209,6 +209,12 @@ The next run should begin from the 13k model weights with fresh optimizers. It s
 6. Run a short isolated pilot, compare fixed images and validation metrics with the 13k checkpoint, and continue only if it wins.
 7. Try 384 px refinement only after the 256 px phase-two experiment is demonstrably better and VRAM-safe.
 
+After the first phase-two pilot still left a bright halo in overexposed skies, V2 added a
+whole-frame discriminator and an upper-scene illumination loss. V2 initializes the proven
+generators but deliberately resets both saturated discriminators. Its critics update once for
+every two generator updates, which gives lighting correction room to improve without letting
+the adversarial signal immediately overpower content preservation.
+
 A useful experiment changes one controlled group of settings and records the result. Randomly extending training or changing many unrelated components at once makes it impossible to explain why the result changed.
 
 ## 11. What is and is not on GitHub

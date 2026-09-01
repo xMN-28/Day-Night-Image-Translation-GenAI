@@ -149,3 +149,43 @@ def color_statistics_loss(generated: torch.Tensor, target: torch.Tensor) -> torc
     generated_mean, generated_std = statistics(generated_01)
     target_mean, target_std = statistics(target_01)
     return F.l1_loss(generated_mean, target_mean) + F.l1_loss(generated_std, target_std)
+
+
+def regional_illumination_loss(
+    source: torch.Tensor,
+    generated: torch.Tensor,
+    target: torch.Tensor,
+    direction: str,
+) -> torch.Tensor:
+    """Match scene-level exposure and focus on likely sky in the upper frame."""
+
+    def luminance(image: torch.Tensor) -> torch.Tensor:
+        image = (image + 1) / 2
+        return 0.299 * image[:, 0:1] + 0.587 * image[:, 1:2] + 0.114 * image[:, 2:3]
+
+    source_luminance = luminance(source)
+    generated_luminance = luminance(generated)
+    target_luminance = luminance(target.detach()).to(generated_luminance.dtype)
+
+    # Horizontal bands capture sky/midground/road exposure without requiring paired scenes.
+    generated_bands = F.adaptive_avg_pool2d(generated_luminance, (3, 1))
+    target_bands = F.adaptive_avg_pool2d(target_luminance, (3, 1))
+    band_loss = F.smooth_l1_loss(generated_bands, target_bands)
+
+    height = source_luminance.shape[2]
+    y = torch.linspace(0, 1, height, device=source.device, dtype=source_luminance.dtype)
+    upper_prior = (1 - y / 0.65).clamp(0, 1).view(1, 1, height, 1)
+    if direction == "day_to_night":
+        candidate_mask = torch.sigmoid((source_luminance - 0.65) * 12) * upper_prior
+    elif direction == "night_to_day":
+        candidate_mask = torch.sigmoid((0.35 - source_luminance) * 12) * upper_prior
+    else:
+        raise ValueError(f"Unsupported direction: {direction}")
+
+    def weighted_mean(image: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        return (image * mask).sum(dim=(2, 3)) / mask.sum(dim=(2, 3)).clamp_min(1e-4)
+
+    generated_focus = weighted_mean(generated_luminance, candidate_mask)
+    target_upper = weighted_mean(target_luminance, upper_prior.expand_as(target_luminance))
+    focus_loss = F.smooth_l1_loss(generated_focus, target_upper)
+    return band_loss + focus_loss
