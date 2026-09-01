@@ -1,5 +1,29 @@
 # LumiCycle Architecture
 
+## LumiRender physics-guided successor
+
+```mermaid
+flowchart LR
+    RGB[sRGB photograph] --> LIN[sRGB to linear radiance]
+    LIN --> FAC[Scene factorizer]
+    FAC --> R[reflectance]
+    FAC --> GEO[depth + normals]
+    FAC --> MAT[roughness + wetness]
+    FAC --> SEM[sky / road / glass / emitter masks]
+    FAC --> LIGHT[8-light anisotropic Gaussian composer]
+    LIGHT --> DIFF[diffuse + specular renderer]
+    GEO --> DIFF
+    MAT --> DIFF
+    SEM --> REFL[screen-space reflections + vertical streaks]
+    DIFF --> BLOOM[multi-scale Gaussian bloom]
+    REFL --> BLOOM
+    BLOOM --> ISP[exposure / WB / tone / vignette / noise]
+    ISP --> RES[bounded high-pass correction ±0.03]
+    RES --> OUT[reproducible night image]
+```
+
+Frozen depth, segmentation and optical-flow models are used only to prepare supervision. They are absent from inference. The new model is one-way day→night; the accepted V2 model continues to serve night→day.
+
 ## System flow
 
 ```mermaid
@@ -62,4 +86,3 @@ stateDiagram-v2
 ```
 
 The test split has no incoming edge to training or checkpoint selection. It is opened only by the final evaluator.
-

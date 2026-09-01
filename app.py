@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import gradio as gr
 from PIL import Image
@@ -21,9 +22,34 @@ CSS = """
 """
 
 
-def run_translation(image: Image.Image, direction: str, model: str, maximum_edge: int):
+def _model_choices() -> list[str]:
+    choices = ["LumiCycle V2", "LumiCycle", "CycleGAN", "Turbo reference"]
+    acceptance = Path("runs/lumirender_physics_bdd100k/acceptance.json")
+    if acceptance.exists() and json.loads(acceptance.read_text(encoding="utf-8")).get("passed"):
+        choices.insert(0, "LumiRender")
+    return choices
+
+
+def run_translation(
+    image: Image.Image,
+    direction: str,
+    model: str,
+    maximum_edge: int,
+    night_intensity: float,
+    seed: int,
+    surface_wetness: float,
+):
     try:
-        output, metadata = translate(image, direction, model, maximum_edge)
+        wetness = None if surface_wetness < 0 else surface_wetness
+        output, metadata = translate(
+            image,
+            direction,
+            model,
+            maximum_edge,
+            night_intensity=night_intensity,
+            seed=seed,
+            surface_wetness=wetness,
+        )
         comparison = (image, output) if HAS_IMAGE_SLIDER else [(image, "Before"), (output, "After")]
         status = "### Translation complete\n```json\n" + json.dumps(metadata, indent=2) + "\n```"
         return output, comparison, status
@@ -52,15 +78,28 @@ def build_app() -> gr.Blocks:
                     direction = gr.Radio(
                         ["Day → Night", "Night → Day"], value="Day → Night", label="Direction"
                     )
+                    models = _model_choices()
                     model = gr.Dropdown(
-                        ["LumiCycle", "CycleGAN", "Turbo reference"],
-                        value="LumiCycle",
+                        models,
+                        value="LumiRender" if "LumiRender" in models else "LumiCycle V2",
                         label="Model",
                         info="Turbo is an externally pretrained benchmark.",
                     )
                 maximum_edge = gr.Slider(
                     256, 1024, value=768, step=64, label="Maximum inference edge"
                 )
+                with gr.Accordion("LumiRender lighting controls", open=False):
+                    night_intensity = gr.Slider(
+                        0.5, 1.5, value=1.0, step=0.05, label="Night intensity"
+                    )
+                    seed = gr.Number(value=0, precision=0, label="Lighting seed")
+                    surface_wetness = gr.Slider(
+                        -1.0,
+                        1.0,
+                        value=-1.0,
+                        step=0.05,
+                        label="Surface wetness (-1 = automatic)",
+                    )
                 with gr.Row():
                     run = gr.Button("Translate", variant="primary")
                     clear = gr.ClearButton(value="Reset")
@@ -78,7 +117,15 @@ def build_app() -> gr.Blocks:
 
         run.click(
             run_translation,
-            inputs=[input_image, direction, model, maximum_edge],
+            inputs=[
+                input_image,
+                direction,
+                model,
+                maximum_edge,
+                night_intensity,
+                seed,
+                surface_wetness,
+            ],
             outputs=[output_image, slider, status],
             api_name="translate",
             concurrency_limit=1,

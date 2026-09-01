@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from .utils import pil_to_tensor, tensor_to_pil
 
 MODEL_PATHS = {
     "LumiCycle": Path("runs/lumicycle_bdd100k/checkpoints"),
+    "LumiCycle V2": Path("runs/lumicycle_v2_bdd100k/checkpoints"),
+    "LumiRender": Path("runs/lumirender_physics_bdd100k/checkpoints"),
     "CycleGAN": Path("runs/cyclegan_bdd100k/checkpoints"),
 }
 
@@ -76,7 +79,8 @@ class ModelManager:
         self.turbo_direction: str | None = None
 
     def _load_custom(self, model_name: str) -> None:
-        configured = os.getenv(f"{model_name.upper()}_CHECKPOINT")
+        environment_name = re.sub(r"[^A-Z0-9]+", "_", model_name.upper()).strip("_")
+        configured = os.getenv(f"{environment_name}_CHECKPOINT")
         checkpoint = _resolve_checkpoint(configured or MODEL_PATHS[model_name])
         if (
             self.loaded_name == model_name
@@ -101,8 +105,18 @@ class ModelManager:
 
     @torch.inference_mode()
     def translate_custom(
-        self, image: Image.Image, direction: str, model_name: str, maximum_edge: int
+        self,
+        image: Image.Image,
+        direction: str,
+        model_name: str,
+        maximum_edge: int,
+        night_intensity: float = 1.0,
+        seed: int = 0,
+        surface_wetness: float | None = None,
     ) -> tuple[Image.Image, dict[str, Any]]:
+        requested_model = model_name
+        if model_name == "LumiRender" and direction == "night_to_day":
+            model_name = "LumiCycle V2"
         self._load_custom(model_name)
         assert self.models is not None
         padded, crop = _fit_and_pad(image, maximum_edge)
@@ -115,13 +129,22 @@ class ModelManager:
             else torch.no_grad()
         )
         with amp:
-            output = self.models[generator_name](tensor)
+            generator = self.models[generator_name]
+            if requested_model == "LumiRender" and direction == "day_to_night":
+                output = generator(
+                    tensor,
+                    night_intensity=float(night_intensity),
+                    seed=int(seed),
+                    surface_wetness=surface_wetness,
+                )
+            else:
+                output = generator(tensor)
         if self.device.type == "cuda":
             torch.cuda.synchronize()
         elapsed = time.perf_counter() - started
         result = tensor_to_pil(output).crop(crop)
         metadata = {
-            "model": model_name,
+            "model": requested_model,
             "direction": direction,
             "input_resolution": f"{image.width}x{image.height}",
             "inference_resolution": f"{result.width}x{result.height}",
@@ -129,6 +152,16 @@ class ModelManager:
             "device": str(self.device),
             "checkpoint": str(self.checkpoint_path),
         }
+        if requested_model == "LumiRender" and direction == "day_to_night":
+            metadata.update(
+                {
+                    "night_intensity": float(night_intensity),
+                    "seed": int(seed),
+                    "surface_wetness": "automatic" if surface_wetness is None else float(surface_wetness),
+                }
+            )
+        elif requested_model == "LumiRender":
+            metadata["fallback"] = "Night→day is served by LumiCycle V2."
         return result, metadata
 
     def translate_turbo(
@@ -162,6 +195,10 @@ def translate(
     direction: str,
     model_name: str = "LumiCycle",
     maximum_edge: int = 768,
+    *,
+    night_intensity: float = 1.0,
+    seed: int = 0,
+    surface_wetness: float | None = None,
 ) -> tuple[Image.Image, dict[str, Any]]:
     if image is None:
         raise ValueError("Upload an image before translating")
@@ -178,7 +215,15 @@ def translate(
             return _MANAGER.translate_turbo(image, normalized)
         if model_name not in MODEL_PATHS:
             raise ValueError(f"Unknown model: {model_name}")
-        return _MANAGER.translate_custom(image, normalized, model_name, maximum_edge)
+        return _MANAGER.translate_custom(
+            image,
+            normalized,
+            model_name,
+            maximum_edge,
+            night_intensity,
+            seed,
+            surface_wetness,
+        )
     except torch.OutOfMemoryError as error:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

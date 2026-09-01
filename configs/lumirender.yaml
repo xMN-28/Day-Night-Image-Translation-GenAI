@@ -1,0 +1,90 @@
+experiment:
+  name: lumirender_physics_bdd100k
+  seed: 46
+  output_dir: runs/lumirender_physics_bdd100k
+data:
+  root: data/bdd100k_daynight
+  image_size: 256
+  resize_size: 286
+  batch_size: 1
+  num_workers: 4
+  paired_fraction: 0.5
+  source_manifests:
+    - data/lumirender_sources/acdc.jsonl
+    - data/lumirender_sources/dark_zurich.jsonl
+    - data/lumirender_sources/samsung.jsonl
+    - data/lumirender_sources/timelapse.jsonl
+  pseudo_manifest: data/lumirender_teachers/train.jsonl
+model:
+  kind: lumirender
+  base_channels: 32
+  gaussian_lights: 8
+  latent_dim: 16
+  activation_checkpointing: true
+  discriminator_channels: 48
+  discriminator_scales: 2
+loss:
+  linear_reconstruction: 10.0
+  reflectance: 5.0
+  aligned_photometric: 3.0
+  perceptual: 1.0
+  gan: 1.0
+  semantic: 1.0
+  depth_normal: 0.5
+  teacher_factorization: 2.0
+  emitter: 0.1
+  physics: 0.1
+  residual: 0.5
+train:
+  max_steps: 28000
+  gradient_accumulation: 2
+  generator_lr: 0.0002
+  discriminator_lr: 0.0001
+  grad_clip: 5.0
+  amp: bf16
+  ema_decay: 0.999
+  max_vram_gb: 11.5
+  target_night_luminance: 0.18
+  log_every: 10
+  validate_every: 500
+  save_every: 500
+  keep_checkpoints: 6
+  stages:
+    - name: factorization_reconstruction
+      until_step: 5000
+      image_size: 256
+      resize_size: 286
+      paired_fraction: 0.0
+      use_teacher_labels: true
+      loss_overrides:
+        aligned_photometric: 0.0
+        perceptual: 0.0
+        gan: 0.0
+        semantic: 0.0
+        emitter: 0.0
+        residual: 0.0
+    - name: physics_synthesis_pretraining
+      until_step: 15000
+      image_size: 256
+      resize_size: 286
+      paired_fraction: 0.0
+      loss_overrides:
+        teacher_factorization: 0.0
+        aligned_photometric: 0.0
+        perceptual: 0.0
+        gan: 0.5
+    - name: correspondence_training
+      until_step: 23000
+      image_size: 384
+      resize_size: 430
+      paired_fraction: 0.75
+      loss_overrides:
+        teacher_factorization: 0.0
+    - name: real_night_refinement
+      until_step: 28000
+      image_size: 384
+      resize_size: 430
+      paired_fraction: 0.25
+      freeze_factorizer: true
+      loss_overrides:
+        teacher_factorization: 0.0

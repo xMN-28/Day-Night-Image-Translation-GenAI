@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import math
 import hashlib
+import math
 import time
 from contextlib import nullcontext
 from pathlib import Path

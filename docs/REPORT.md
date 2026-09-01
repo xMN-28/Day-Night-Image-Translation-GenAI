@@ -148,9 +148,19 @@ All local-model inference works without internet after checkpoints and DINO cach
 - Generated images must not be used directly for vehicle control, evidence, or surveillance decisions.
 - BDD100K and external model licenses must be respected; dataset images are not redistributed.
 
-## 11. Conclusion
+## 11. LumiRender: Physics-Guided Successor Experiment
 
-LumiCycle turns the selected paper into a reproducible and testable system suitable for a college demonstration. Its central improvement is not merely a more complicated generator: it is a complete experimental pipeline that separates data correctly, preserves semantics through multiple constraints, survives interrupted consumer-GPU training, measures failure beyond visual appeal, and clearly distinguishes local work from external benchmarks.
+Later experiments showed that improving CycleGAN losses alone could not reliably produce plausible skies, tree-branch boundaries, artificial-light placement and road reflections. V2.1 was especially informative: its Laplacian/detail constraints preserved fine structure but weakened the required global lighting change. It is therefore reported as a failed ablation rather than hidden.
+
+LumiRender restarts from random weights and reframes the task as image formation. A scene factorizer predicts reflectance, daylight illumination, depth, normals, roughness, wetness, semantic regions and emitter candidates. Eight anisotropic 2D Gaussian lights plus a smooth ambient/horizon field illuminate the inferred scene. A differentiable image-space renderer adds diffuse/specular terms, road/glass reflections, wet-road streaks and multi-scale bloom. Exposure, white balance, tone mapping, vignetting and Poisson–Gaussian noise form the camera stage. A high-pass correction is bounded to ±0.03 linear RGB.
+
+Frozen Depth Anything V2 and Cityscapes Mask2Former models generate offline pseudo-labels; RAFT aligns coarse licensed pairs and creates forward/backward confidence masks. These teachers are absent from inference. The model trains in four stages totaling 28,000 optimizer steps. It is accepted only after the fixed difficult-scene suite, automatic metrics and blinded team review all pass. Until then, LumiCycle V2 remains the showcase default.
+
+The 245-record reproducible abstract screen and 30-paper design matrix are supplied in `docs/LUMIRENDER_LITERATURE_SCREEN.csv` and `docs/LUMIRENDER_LITERATURE_REVIEW.md`. This architecture is a college research contribution, not a state-of-the-art claim and not recovery of the unknowable true night state.
+
+## 12. Conclusion
+
+LumiCycle turns the selected paper into a reproducible baseline, while LumiRender tests a more fundamental hypothesis: physically constrained factors and rendering should preserve scene geometry better than unconstrained RGB style translation. The implementation is complete, but the hypothesis must be accepted or rejected using the planned training runs and untouched evaluation—not asserted from architecture alone.
 
 ## References
 
@@ -162,4 +172,3 @@ LumiCycle turns the selected paper into a reproducible and testable system suita
 6. G. Parmar et al., “One-Step Image Translation with Text-to-Image Models,” 2024.
 7. R. Hara and Q. Chen, “Unpaired Day-to-Night Image Translation Using Deep Generative Model,” IEEE GCCE, 2025.
 8. M. S. Alam, P. Singh, and P. Bazilinskyy, “A Survey of Day-Night Illumination Domain Translation for Outdoor Vision,” 2026.
-

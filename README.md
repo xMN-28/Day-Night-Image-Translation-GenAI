@@ -1,4 +1,8 @@
-# LumiCycle: Bidirectional Day ↔ Night Image Translation
+# LumiRender / LumiCycle: Physics-Guided Day ↔ Night Translation
+
+**Current research model:** LumiRender is a new, from-scratch, day→night architecture that explicitly predicts scene factors, composes eight spatially constrained Gaussian lights, renders material-aware reflections and bloom, and simulates a nighttime camera. LumiCycle V1/V2 remain reproducible baselines; V2 serves night→day until a physics-guided reverse model is developed.
+
+LumiRender is not a continuation of any CycleGAN checkpoint. Its originality claim is the local factorizer–composer–renderer–camera integration and the constrained training/evaluation protocol—not the invention of inverse rendering, RAFT, Depth Anything, Mask2Former, or Gaussian kernels.
 
 LumiCycle is a complete college research project for translating unpaired road-scene images in both directions:
 
@@ -26,28 +30,54 @@ illumination critic, and trains the discriminators every second generator update
 python -m daynight.train --config configs/lumicycle_v2.yaml --init-from runs/lumicycle_bdd100k/checkpoints/step_00013000.pt --pilot
 ```
 
-V2.1 is a detail-preserving continuation of the accepted V2 checkpoint. It keeps the
-V2 encoder frozen, starts from `step_00004500.pt`, and zero-initializes a two-level
-Laplacian refiner so its first output is numerically identical to V2. Stage A learns
-only the refiner and Haar-wavelet critics at 256 px; Stage B fine-tunes the refiner,
-V2 residual/decoder layers, and critics at 384 px:
+V2.1 is retained only as a failed scientific ablation. Its structure losses suppressed the lighting transformation, so it is not an active training recommendation. Its ignored checkpoints and comparisons remain available for honest reporting.
+
+## LumiRender quick path
+
+Install the optional offline-teacher tools, cache BDD factorization targets, and train the held-out night evaluator once:
 
 ```powershell
-python -m daynight.train --config configs/lumicycle_v2_1.yaml `
-  --init-from runs/lumicycle_v2_bdd100k/checkpoints/step_00004500.pt `
-  --max-hours 8
+python -m pip install -e ".[teachers]"
+python -m daynight.prepare_teacher_targets --data-root data/bdd100k_daynight
+python -m daynight.night_classifier --data-root data/bdd100k_daynight
 ```
 
-In a second terminal, point the plain-English live monitor at this run:
+Licensed ACDC/Dark Zurich pairs are aligned and registered without copying them into Git:
 
 ```powershell
-$env:LUMICYCLE_RUN_ROOT = "runs/lumicycle_v2_1_bdd100k"
-python monitor.py
+python -m daynight.align_lumirender_pairs --pairs-csv D:\datasets\acdc\pairs.csv --output data\aligned\acdc
+python -m daynight.prepare_lumirender_data --pairs-csv data\aligned\acdc\aligned_pairs.csv --source acdc
 ```
 
-The V2.1 checkpoint records the absolute parent path, source step, and SHA-256 digest.
-It does not overwrite any V1 or V2 checkpoints. See [V2_1_IMPLEMENTATION.md](V2_1_IMPLEMENTATION.md)
-for the architecture, training stages, acceptance checks, and recovery commands.
+Run the strict preflight after registering sources. It refuses to start the factorization stage without teacher targets and refuses to enter correspondence training without licensed pairs:
+
+```powershell
+python -m daynight.preflight_lumirender
+```
+
+Before final acceptance, create a CSV with `category,image_path` and at least one image in every required difficult-scene category, then register it:
+
+```powershell
+python -m daynight.prepare_lumirender_suite --csv D:\datasets\lumirender_suite.csv
+```
+
+Blind the model labels in the exported comparison gallery and collect a team CSV with columns `reviewer,sample,night_realism,unchanged_geometry,light_placement,reflections,artifacts`; each vote is `lumirender`, `v2`, or `tie`. Then score it with `python -m daynight.score_blind_review --csv <file>`.
+
+Run a 500-step low-risk pilot, then resume multi-night training:
+
+```powershell
+python -m daynight.train_lumirender --config configs/lumirender.yaml --pilot
+python -m daynight.train_lumirender --config configs/lumirender.yaml --max-hours 8 --resume auto
+```
+
+The four stages are 5k factorization/reconstruction steps, 10k randomized physics steps, 8k correspondence steps at 256→384 px, and 5k real-night refinement steps. LumiRender is added to Gradio only after the acceptance evaluator passes:
+
+```powershell
+python -m daynight.evaluate --checkpoint runs/lumirender_physics_bdd100k/checkpoints --output outputs/evaluation/lumirender
+python -m daynight.evaluate_lumirender --checkpoint runs/lumirender_physics_bdd100k/checkpoints
+```
+
+See [the fundamentals chapter](docs/LUMIRENDER_FUNDAMENTALS.md), [245-record literature screen](docs/LUMIRENDER_LITERATURE_SCREEN.csv), and [30-paper implementation review](docs/LUMIRENDER_LITERATURE_REVIEW.md).
 
 ## What is original in this project?
 
@@ -66,10 +96,13 @@ LumiCycle does not claim that the team invented CycleGAN, attention, DINOv2, or 
 ```text
 daynight/                    Python package
   prepare_data.py            BDD100K validation, filtering, duplicate-safe splitting
-  models/                    CycleGAN and LumiCycle networks
+  models/                    CycleGAN, LumiCycle and LumiRender networks
   trainer.py                 Losses, training, monitoring, recovery and resume
   inference.py               Stable translate(image, direction, model) API
   evaluate.py                FID, KID, DINO, edge and optional detector metrics
+  lumirender_trainer.py      Four-stage physics-guided training
+  prepare_teacher_targets.py Offline depth/semantic pseudo-label generation
+  align_lumirender_pairs.py  Frozen-RAFT alignment and occlusion confidence
 configs/                     Reproducible experiment configurations
 scripts/                     Windows setup, training, evaluation and demo commands
 tests/                       Unit and CUDA smoke tests

@@ -6,8 +6,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-import torch
 import numpy as np
+import torch
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset
 

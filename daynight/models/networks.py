@@ -404,6 +404,25 @@ def init_weights(module: nn.Module) -> None:
 
 def build_models(config: dict) -> dict[str, nn.Module]:
     model_config = config["model"]
+    if str(model_config.get("kind", "")).lower() == "lumirender":
+        from .lumirender import LumiRender
+
+        generator = LumiRender(
+            base_channels=int(model_config.get("base_channels", 32)),
+            lights=int(model_config.get("gaussian_lights", 8)),
+            latent_dim=int(model_config.get("latent_dim", 16)),
+            activation_checkpointing=bool(model_config.get("activation_checkpointing", True)),
+        )
+        discriminator = MultiScaleDiscriminator(
+            int(model_config.get("discriminator_channels", 48)),
+            scales=int(model_config.get("discriminator_scales", 2)),
+        )
+        generator.apply(init_weights)
+        discriminator.apply(init_weights)
+        # Preserve the correction network's identity initialization after generic init.
+        nn.init.zeros_(generator.correction.net[-1].weight)
+        nn.init.zeros_(generator.correction.net[-1].bias)
+        return {"G_day_night": generator, "D_night": discriminator}
     base = int(model_config.get("base_channels", 64))
     blocks = int(model_config.get("generator_blocks", 9))
     attention = bool(model_config.get("attention", False))
