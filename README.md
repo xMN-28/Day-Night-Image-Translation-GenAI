@@ -87,6 +87,17 @@ python -m daynight.train_lumirender --config configs/lumirender.yaml --pilot
 python -m daynight.train_lumirender --config configs/lumirender.yaml --max-hours 8 --resume auto
 ```
 
+For an open-ended run with a local Start/Resume and cooperative Save & Stop button:
+
+```powershell
+.\scripts\control_lumirender.ps1 -Start
+```
+
+Open `http://127.0.0.1:7862`. Save & Stop finishes the current optimizer step, writes an
+atomic checkpoint containing the global step, model/EMA weights, optimizers, schedulers and RNG
+state, and then exits the trainer. Start/Resume continues from that same global step and appends
+to the existing TensorBoard history. The counter resets only for an explicitly new architecture run.
+
 The four stages are 5k factorization/reconstruction steps, 10k randomized physics steps, 8k correspondence steps at 256→384 px, and 5k real-night refinement steps. LumiRender is added to Gradio only after the acceptance evaluator passes:
 
 ```powershell

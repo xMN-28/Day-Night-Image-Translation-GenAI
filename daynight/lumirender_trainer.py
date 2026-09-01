@@ -66,8 +66,17 @@ class LumiRenderTrainer:
             ),
         }
         maximum = int(train["max_steps"])
+        minimum_lr = float(train.get("minimum_lr", 1e-6))
         self.schedulers = {
-            name: torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, maximum, eta_min=1e-6)
+            name: torch.optim.lr_scheduler.LambdaLR(
+                optimizer,
+                lambda step, base_lr=optimizer.defaults["lr"]: (
+                    minimum_lr / base_lr
+                    + (1 - minimum_lr / base_lr)
+                    * 0.5
+                    * (1 + math.cos(math.pi * min(step, maximum) / maximum))
+                ),
+            )
             for name, optimizer in self.optimizers.items()
         }
         self.ema = {
@@ -93,6 +102,10 @@ class LumiRenderTrainer:
         self.checkpoints = CheckpointManager(
             self.output_dir, int(train.get("keep_checkpoints", 6))
         )
+        self.control_dir = self.output_dir / "control"
+        self.control_dir.mkdir(parents=True, exist_ok=True)
+        self.stop_request = self.control_dir / "stop.request"
+        self.status_path = self.control_dir / "status.json"
         self.step = 0
         self.microstep = 0
         self.training_state: dict[str, Any] = {
@@ -331,6 +344,27 @@ class LumiRenderTrainer:
     def save_checkpoint(self, best: bool = False) -> Path:
         return self.checkpoints.save(self.step, self.checkpoint_payload(), best=best)
 
+    def write_status(
+        self,
+        state: str,
+        metrics: dict[str, float] | None = None,
+        checkpoint: Path | None = None,
+        message: str | None = None,
+    ) -> None:
+        stage = self.config["train"]["stages"][self._stage_index()]["name"]
+        atomic_json_dump(
+            {
+                "state": state,
+                "step": self.step,
+                "stage": stage,
+                "metrics": metrics or {},
+                "checkpoint": str(checkpoint.resolve()) if checkpoint else None,
+                "message": message,
+                "updated_at": time.time(),
+            },
+            self.status_path,
+        )
+
     def load_checkpoint(self, path: str | Path) -> None:
         payload = torch.load(path, map_location=self.device, weights_only=False)
         if payload.get("config_hash") != config_hash(self.config):
@@ -348,7 +382,7 @@ class LumiRenderTrainer:
         restore_rng_state(payload["rng"])
         print(f"Resumed LumiRender from {path} at step {self.step}")
 
-    def run(self, max_hours: float | None = None) -> None:
+    def run(self, max_hours: float | None = None, continuous: bool = False) -> None:
         train = self.config["train"]
         maximum = int(train["max_steps"])
         save_every = int(train.get("save_every", 500))
@@ -357,11 +391,21 @@ class LumiRenderTrainer:
         vram_limit = float(train.get("max_vram_gb", 11.5))
         started = time.monotonic()
         iterator = iter(self.train_loader)
-        progress = tqdm(total=maximum, initial=self.step, desc="LumiRender")
+        progress = tqdm(
+            total=None if continuous else maximum,
+            initial=self.step,
+            desc="LumiRender continuous" if continuous else "LumiRender",
+            unit="step",
+        )
+        last_metrics: dict[str, float] = {}
+        final_checkpoint: Path | None = None
+        final_state = "stopped"
+        final_message: str | None = None
+        self.write_status("running", message="Training started or resumed")
         for optimizer in self.optimizers.values():
             optimizer.zero_grad(set_to_none=True)
         try:
-            while self.step < maximum:
+            while continuous or self.step < maximum:
                 if max_hours and time.monotonic() - started >= max_hours * 3600:
                     print("Time budget reached; saving LumiRender checkpoint.")
                     break
@@ -378,6 +422,7 @@ class LumiRenderTrainer:
                 if not should_step:
                     continue
                 self.step += 1
+                last_metrics = metrics
                 progress.update(1)
                 if self.device.type == "cuda":
                     peak = torch.cuda.max_memory_allocated() / 1024**3
@@ -390,6 +435,14 @@ class LumiRenderTrainer:
                 if self.step % log_every == 0:
                     for name, value in metrics.items():
                         self.writer.add_scalar(name, value, self.step)
+                    stage_name = train["stages"][self._stage_index()]["name"]
+                    useful = " ".join(
+                        f"{name}={value:.4f}"
+                        for name, value in metrics.items()
+                        if name in {"total", "gan", "aligned_photometric", "health/peak_vram_gb"}
+                    )
+                    print(f"step={self.step} stage={stage_name} {useful}", flush=True)
+                self.write_status("running", metrics)
                 if self.step % validate_every == 0:
                     validation = self.validate()
                     for name, value in validation.items():
@@ -421,9 +474,17 @@ class LumiRenderTrainer:
                 if self.step % save_every == 0:
                     self.save_checkpoint()
                 self.writer.flush()
+                if self.stop_request.exists():
+                    print(
+                        f"Save & Stop requested; checkpointing completed step {self.step}.",
+                        flush=True,
+                    )
+                    break
         except KeyboardInterrupt:
             print("Interrupted; saving LumiRender checkpoint.")
         except Exception as error:
+            final_state = "error"
+            final_message = str(error)
             self.training_state["recoveries"] += 1
             atomic_json_dump(
                 {"step": self.step, "error": str(error)},
@@ -433,9 +494,17 @@ class LumiRenderTrainer:
             if latest is not None:
                 self.load_checkpoint(latest)
                 print(f"Rolled back to last finite checkpoint: {latest}")
+            self.write_status("error", message=str(error))
             raise
         finally:
-            self.save_checkpoint()
+            final_checkpoint = self.save_checkpoint()
+            self.stop_request.unlink(missing_ok=True)
+            self.write_status(
+                final_state,
+                last_metrics,
+                checkpoint=final_checkpoint,
+                message=final_message or f"Saved completed step {self.step}",
+            )
             self.writer.flush()
             self.writer.close()
             progress.close()

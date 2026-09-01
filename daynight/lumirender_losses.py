@@ -79,9 +79,14 @@ def teacher_factorization_loss(
     if not bool(mask.any()):
         return details["depth"].new_zeros(())
     depth = F.smooth_l1_loss(details["depth"], teacher_depth, reduction="none")
-    semantic = F.binary_cross_entropy(
-        details["semantic"].clamp(1e-5, 1 - 1e-5), teacher_semantic, reduction="none"
-    )
+    # Probability-form BCE is intentionally evaluated outside BF16 autocast.
+    # The factorizer exposes probabilities because the same tensor is consumed by the renderer.
+    with torch.autocast(device_type=details["semantic"].device.type, enabled=False):
+        semantic = F.binary_cross_entropy(
+            details["semantic"].float().clamp(1e-5, 1 - 1e-5),
+            teacher_semantic.float(),
+            reduction="none",
+        )
     dx = F.pad(teacher_depth[..., :, 1:] - teacher_depth[..., :, :-1], (0, 1, 0, 0))
     dy = F.pad(teacher_depth[..., 1:, :] - teacher_depth[..., :-1, :], (0, 0, 0, 1))
     teacher_normals = F.normalize(

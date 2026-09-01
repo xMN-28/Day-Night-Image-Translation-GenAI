@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 
 from daynight.config import load_config
-from daynight.lumirender_losses import paired_perceptual_loss
+from daynight.lumirender_losses import paired_perceptual_loss, teacher_factorization_loss
 from daynight.models import LumiRender, gaussian_blur, linear_to_srgb, srgb_to_linear
 from daynight.models.networks import build_models
 
@@ -59,3 +59,23 @@ def test_paired_perceptual_loss_respects_alignment_confidence() -> None:
     assert paired_perceptual_loss(
         generated, target, torch.ones(1, 1, 32, 32), aligned
     ).item() > 0
+
+
+def test_teacher_factorization_loss_is_autocast_safe() -> None:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    semantic_logits = torch.randn(1, 6, 16, 16, device=device, requires_grad=True)
+    details = {
+        "depth": torch.sigmoid(torch.randn(1, 1, 16, 16, device=device, requires_grad=True)),
+        "semantic": torch.sigmoid(semantic_logits),
+        "normals": torch.nn.functional.normalize(torch.randn(1, 3, 16, 16, device=device), dim=1),
+    }
+    with torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
+        loss = teacher_factorization_loss(
+            details,
+            torch.rand(1, 1, 16, 16, device=device),
+            torch.rand(1, 6, 16, 16, device=device),
+            torch.ones(1, device=device),
+        )
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert semantic_logits.grad is not None
