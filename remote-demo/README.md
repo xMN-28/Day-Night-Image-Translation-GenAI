@@ -8,8 +8,8 @@ result.
 ## Required Vercel resources
 
 1. Link this directory to a Vercel project.
-2. Add a Vercel Blob store. Production uses Vercel OIDC; local development may use a read-write
-   token.
+2. Add a Vercel Blob store with OIDC plus a static read-write token. The scoped
+   `BLOB_READ_WRITE_TOKEN` is required by the direct browser-upload authorization route.
 3. Add an Upstash Redis integration, which supplies `UPSTASH_REDIS_REST_URL` and
    `UPSTASH_REDIS_REST_TOKEN` (or the equivalent `KV_REST_API_*` variables).
 4. Set `WORKER_SECRET` to a long random value.
