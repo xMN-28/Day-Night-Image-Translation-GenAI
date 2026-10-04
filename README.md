@@ -1,5 +1,8 @@
 # LumiRender / LumiCycle: Physics-Guided Day ↔ Night Translation
 
+For the current implemented architecture, experiment lineage, and a candid analysis of remaining
+flaws, see [Current Model Architecture](docs/CURRENT_MODEL_ARCHITECTURE.md).
+
 **Current research model:** LumiRender is a new, from-scratch, day→night architecture that explicitly predicts scene factors, composes eight spatially constrained Gaussian lights, renders material-aware reflections and bloom, and simulates a nighttime camera. LumiCycle V1/V2 remain reproducible baselines; V2 serves night→day until a physics-guided reverse model is developed.
 
 LumiRender is not a continuation of any CycleGAN checkpoint. Its originality claim is the local factorizer–composer–renderer–camera integration and the constrained training/evaluation protocol—not the invention of inverse rendering, RAFT, Depth Anything, Mask2Former, or Gaussian kernels.
