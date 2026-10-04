@@ -29,8 +29,12 @@ npm run dev
 From the repository root, with the Python virtual environment active, use the prepared launcher:
 
 ```powershell
-.\scripts\start_remote_demo_worker.ps1
+start_remote_worker.bat
 ```
+
+It can also be started by double-clicking `start_remote_worker.bat` in File Explorer. The batch
+file calls `scripts\start_remote_demo_worker.ps1`, which reads the worker secret from the Windows
+user environment rather than storing it in Git.
 
 The equivalent manual command is:
 

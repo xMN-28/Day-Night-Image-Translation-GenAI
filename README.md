@@ -33,8 +33,11 @@ uploads the result. No router port forwarding or public tunnel is required.
 Before leaving for college, prevent the PC from sleeping and run:
 
 ```powershell
-.\scripts\start_remote_demo_worker.ps1
+start_remote_worker.bat
 ```
+
+You can also double-click `start_remote_worker.bat` in the project folder. Keep its terminal
+window open while the remote demonstration is in progress.
 
 The website is ready when its **GPU online** indicator turns green. The showcase access code is
 kept separately from Git. Deployment and storage details are in
