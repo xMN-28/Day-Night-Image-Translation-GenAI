@@ -78,10 +78,14 @@ class ModelManager:
         self.turbo: TurboReference | None = None
         self.turbo_direction: str | None = None
 
-    def _load_custom(self, model_name: str) -> None:
+    def _load_custom(
+        self, model_name: str, checkpoint_override: str | Path | None = None
+    ) -> None:
         environment_name = re.sub(r"[^A-Z0-9]+", "_", model_name.upper()).strip("_")
         configured = os.getenv(f"{environment_name}_CHECKPOINT")
-        checkpoint = _resolve_checkpoint(configured or MODEL_PATHS[model_name])
+        checkpoint = _resolve_checkpoint(
+            checkpoint_override or configured or MODEL_PATHS[model_name]
+        )
         if (
             self.loaded_name == model_name
             and self.checkpoint_path == checkpoint
@@ -113,11 +117,13 @@ class ModelManager:
         night_intensity: float = 1.0,
         seed: int = 0,
         surface_wetness: float | None = None,
+        checkpoint_override: str | Path | None = None,
+        display_name: str | None = None,
     ) -> tuple[Image.Image, dict[str, Any]]:
-        requested_model = model_name
+        requested_model = display_name or model_name
         if model_name == "LumiRender" and direction == "night_to_day":
             model_name = "LumiCycle V2"
-        self._load_custom(model_name)
+        self._load_custom(model_name, checkpoint_override)
         assert self.models is not None
         padded, crop = _fit_and_pad(image, maximum_edge)
         tensor = pil_to_tensor(padded).unsqueeze(0).to(self.device)

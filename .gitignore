@@ -22,3 +22,7 @@ external/
 Unpaired_Day-to-Night_Image_Translation_Using_Deep_Generative_Model.pdf
 wandb/
 .env
+remote-demo/.env.local
+remote-demo/.vercel/
+remote-demo/node_modules/
+remote-demo/.next/

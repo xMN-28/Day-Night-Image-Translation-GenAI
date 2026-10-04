@@ -3,9 +3,15 @@
 For the current implemented architecture, experiment lineage, and a candid analysis of remaining
 flaws, see [Current Model Architecture](docs/CURRENT_MODEL_ARCHITECTURE.md).
 
-**Current research model:** LumiRender is a new, from-scratch, day→night architecture that explicitly predicts scene factors, composes eight spatially constrained Gaussian lights, renders material-aware reflections and bloom, and simulates a nighttime camera. LumiCycle V1/V2 remain reproducible baselines; V2 serves night→day until a physics-guided reverse model is developed.
+**Current recommended model:** LumiCycle V2 best (step 4,500) is the active showcase model.
+LumiRender was a from-scratch physics-guided experiment with explicit scene factors, Gaussian
+lights, reflections, bloom, and camera simulation, but its trained checkpoint mostly learned global
+darkening and is retained only as a documented negative result. V1, V2.1, and LumiRender remain
+available in the comparison interface for scientific honesty.
 
-LumiRender is not a continuation of any CycleGAN checkpoint. Its originality claim is the local factorizer–composer–renderer–camera integration and the constrained training/evaluation protocol—not the invention of inverse rendering, RAFT, Depth Anything, Mask2Former, or Gaussian kernels.
+LumiRender was not a continuation of any CycleGAN checkpoint. Its originality claim is the local
+factorizer–composer–renderer–camera integration and constrained training/evaluation protocol—not
+the invention of inverse rendering, RAFT, Depth Anything, Mask2Former, or Gaussian kernels.
 
 LumiCycle is a complete college research project for translating unpaired road-scene images in both directions:
 
@@ -13,6 +19,26 @@ LumiCycle is a complete college research project for translating unpaired road-s
 - Night → Day
 
 It includes a locally implemented CycleGAN baseline, the team’s enhanced LumiCycle model, resumable overnight training, quantitative evaluation, an optional external CycleGAN-Turbo benchmark, and an offline Gradio demonstration.
+
+## Remote college demo
+
+The public showcase is deployed at [lumicycle-remote-demo.vercel.app](https://lumicycle-remote-demo.vercel.app).
+It deliberately resembles the local Gradio interface and lets the presenter switch between the
+locally trained V1, V2, V2.1, and LumiRender checkpoints. V2 best is the recommended default.
+
+Vercel hosts only the interface, image storage, and job queue. Model inference remains on the
+home RTX 4070 Super: the PC polls Vercel over outbound HTTPS, runs the selected checkpoint, and
+uploads the result. No router port forwarding or public tunnel is required.
+
+Before leaving for college, prevent the PC from sleeping and run:
+
+```powershell
+.\scripts\start_remote_demo_worker.ps1
+```
+
+The website is ready when its **GPU online** indicator turns green. The showcase access code is
+kept separately from Git. Deployment and storage details are in
+[remote-demo/README.md](remote-demo/README.md).
 
 The implementation is based on the supplied 2025 IEEE paper *Unpaired Day-to-Night Image Translation Using Deep Generative Model*. Unlike the paper’s NAS procedure, LumiCycle keeps validation and test images out of training and selects checkpoints using validation data only.
 
