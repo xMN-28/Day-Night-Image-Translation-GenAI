@@ -26,10 +26,16 @@ class RemoteModel:
     label: str
     engine_name: str
     checkpoint: Path
-    directions: tuple[str, ...] = ("day_to_night", "night_to_day")
+    directions: tuple[str, ...] = ("day_to_night",)
 
 
 MODEL_CATALOG = {
+    "distilled_best": RemoteModel(
+        "LumiCycle distilled student — experimental",
+        "LumiCycle distilled student",
+        Path(os.getenv("LUMICYCLE_DISTILLED_STUDENT_CHECKPOINT",
+            "E:/LumiCycleCache/experiments/turbo_vgg_target_control/best.pt")),
+    ),
     "v2_best": RemoteModel(
         "LumiCycle V2 — best (4.5k)",
         "LumiCycle V2",

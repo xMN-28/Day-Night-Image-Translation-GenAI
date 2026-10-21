@@ -1,5 +1,12 @@
 # LumiCycle Remote Demo
 
+The supported public mapping is **Day → Night only**. The inverse feature was
+withdrawn for poor quality. The optional `distilled_best` model is a local RGB
+student trained with external CycleGAN-Turbo pseudo-targets; it is not the external
+diffusion model itself. Its weights default to E:/LumiCycleCache and may be located
+elsewhere using `LUMICYCLE_DISTILLED_STUDENT_CHECKPOINT`. Restart the home worker
+after updating source so its catalog and inference guards match the web release.
+
 This is the public web interface for LumiCycle. Vercel serves the page, accepts image uploads,
 and holds a short-lived job queue. The model weights never leave the project PC: the Python
 worker polls the queue over outbound HTTPS, runs inference on the RTX 4070 Super, and uploads the

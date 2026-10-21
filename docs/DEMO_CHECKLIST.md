@@ -5,7 +5,9 @@
 - [ ] Freeze the exact best checkpoint; do not train it again.
 - [ ] Run the complete test suite.
 - [ ] Run final evaluation and copy metrics into the report/slides.
-- [ ] Test both directions with five saved images.
+- [ ] Test Day → Night with five saved images. The inverse feature is withdrawn.
+- [ ] For the curated student examples, select the explicitly labeled distilled student and 512 px.
+- [ ] Keep `outputs/demo_showcase` locally as backup; these are curated validation examples, not a benchmark.
 - [ ] Start the demo once with internet, then test again offline.
 - [ ] Save at least six backup before/after screenshots.
 - [ ] Copy the repository, checkpoints, results, and slides to a second drive.

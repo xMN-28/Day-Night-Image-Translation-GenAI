@@ -1,7 +1,8 @@
-# LumiRender / LumiCycle: Physics-Guided Day ↔ Night Translation
+# LumiCycle: Day → Night Image Translation
 
-For the current implemented architecture, experiment lineage, and a candid analysis of remaining
-flaws, see [Current Model Architecture](docs/CURRENT_MODEL_ARCHITECTURE.md).
+For a complete, source-grounded explanation designed for study and viva preparation, start with
+the [LumiCycle Master Guide](docs/PROJECT_MASTER_GUIDE.md). For the compact implemented
+architecture and experiment lineage, see [Current Model Architecture](docs/CURRENT_MODEL_ARCHITECTURE.md).
 
 **Current recommended model:** LumiCycle V2 best (step 4,500) is the active showcase model.
 LumiRender was a from-scratch physics-guided experiment with explicit scene factors, Gaussian
@@ -13,10 +14,15 @@ LumiRender was not a continuation of any CycleGAN checkpoint. Its originality cl
 factorizer–composer–renderer–camera integration and constrained training/evaluation protocol—not
 the invention of inverse rendering, RAFT, Depth Anything, Mask2Former, or Gaussian kernels.
 
-LumiCycle is a complete college research project for translating unpaired road-scene images in both directions:
+LumiCycle is a college research project for translating daytime road-scene images:
 
 - Day → Night
-- Night → Day
+
+The public demo is **Day → Night only**. The unreliable inverse mapping has been
+withdrawn; inverse generators remain only in historical cycle-training code and
+checkpoints. See [current architecture](docs/CURRENT_MODEL_ARCHITECTURE.md) and
+[changes and experiment results](docs/CHANGES.md). The optional distilled student
+uses external CycleGAN-Turbo pseudo-target supervision and is explicitly labeled.
 
 It includes a locally implemented CycleGAN baseline, the team’s enhanced LumiCycle model, resumable overnight training, quantitative evaluation, an optional external CycleGAN-Turbo benchmark, and an offline Gradio demonstration.
 
@@ -324,10 +330,16 @@ FID/KID require enough examples to be meaningful. Use the full untouched test sp
 The official Turbo model is an external pretrained reference, not the team’s contribution.
 
 ```powershell
-.\scripts\setup_turbo_reference.ps1
+.\scripts\setup_turbo_reference_isolated.ps1 -CacheRoot E:\LumiCycleCache
+.\scripts\run_turbo_reference_pilot.ps1 -CacheRoot E:\LumiCycleCache
 ```
 
 Its upstream code and weights come from [GaParmar/img2img-turbo](https://github.com/GaParmar/img2img-turbo). Keep its results in a clearly labeled “external pretrained” column. If upstream dependency changes cause incompatibility, the core project and demo remain functional without it.
+
+The isolated pilot pins the upstream source/base-model revision, reuses the existing CUDA
+PyTorch installation, and installs older reference dependencies only in the E: cache.
+It does not replace a local generator or automatically enable the main app's legacy
+Turbo adapter. See [reference/teacher evaluation](docs/REFERENCE_TEACHER_EVALUATION.md).
 
 ## 8. Launch the offline demo
 
@@ -342,7 +354,7 @@ The browser opens at `http://127.0.0.1:7860`. The app provides upload/webcam/cli
 For the college showcase:
 
 1. Launch while internet is available once so all model caches exist.
-2. Disconnect the network and test LumiCycle in both directions.
+2. Disconnect the network and test LumiCycle Day → Night.
 3. Keep backup comparison screenshots in the presentation folder.
 4. Use LumiCycle as the default. Only select Turbo when explaining the benchmark.
 

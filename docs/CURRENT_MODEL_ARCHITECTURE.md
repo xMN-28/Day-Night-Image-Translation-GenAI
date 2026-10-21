@@ -1,5 +1,98 @@
 # Current Model Architecture and Experiment History
 
+## Current release update — 21 October 2026 (read this first)
+
+The public project is now **day → night only**. Night → day was evaluated and
+produced poor visual results; it is being withdrawn from the local and remote
+interfaces and rejected by the public inference API. Historical inverse-generator
+weights, cycle-training code and experiment records are retained for reproducibility.
+Removing that training component would change the original algorithm; withdrawing
+the unreliable product feature does not require deleting it from old checkpoints.
+
+There are two distinct model tracks, not one universally best model:
+
+| Track | Weights | What it means |
+|---|---|---|
+| Original demo / historical parent | `runs/lumicycle_v2_bdd100k/checkpoints/step_00004500.pt` | Locally trained CycleGAN-derived V2; no diffusion backbone at inference |
+| Latest experimental local student | `E:/LumiCycleCache/experiments/turbo_vgg_target_control/best.pt` | Resize-convolution ResNet continued using external CycleGAN-Turbo-generated night pseudo-targets; lowest internal fidelity loss in this matched continuation, not a validated universal quality winner |
+| Matched VGG experiment | `E:/LumiCycleCache/experiments/turbo_vgg_target_pilot/latest.pt` | Same local student plus a frozen training-only VGG16 target-feature loss; no meaningful overall advantage over the matched control |
+
+The experimental models do **not** run Stable Diffusion or VGG during inference.
+They nevertheless depend on external pretrained models through their supervision;
+calling them fully trained from scratch without external assistance would be false.
+The public V2 default was not silently replaced by these experiments.
+
+### Latest student's architecture
+
+RGB is EXIF-corrected, aspect-ratio resized and reflection-padded to a multiple of
+four, then mapped to [-1,1]. The generator retains the V2 stem (7×7, 3→64), two
+stride-two encoders (64→128→256), nine 256-channel residual blocks with CBAM
+channel/spatial attention and InstanceNorm, and a 7×7 64→3 tanh head. The decoder
+uses nearest-neighbor resize plus reflection-padded convolution instead of
+transposed convolution. Existing useful weights were migrated/continued rather
+than replacing the generator with a pretrained diffusion backbone. EMA generator
+weights are used for comparisons. The student directly predicts RGB: it does not
+estimate calibrated depth, materials, sun position or true physical illumination.
+
+The separate earlier Sky candidate combines a trained generator, 16-phase output
+averaging, a locally trained semantic matte network and explicit night-sky
+compositing. It is an interpretable hybrid, not evidence that the RGB generator
+learned to relight every sky pixel. The latest matched student evaluations use raw
+generator output, without that analytic sky replacement.
+
+### Latest training recipe and evidence
+
+An expanded cache contains 2,048 training and 48 validation daytime sources with
+explicitly external teacher-generated night targets at 512×288. This is pseudo-paired
+distillation, not real aligned ground truth. BF16, batch four, Adam 1e-4, gradient
+clipping and EMA were used in the final matched runs. Their shared parent was the
+sky-target branch at global step 29,850; each added 1,000 updates, finishing at
+30,850. Global lineage includes earlier stages, so it is not 30,850 updates under
+one objective. Optimizer/RNG continuation and deterministic short restart checks
+were implemented; a VGG restart audit measured zero difference on the same stack.
+
+The objective combines 10×RGB L1, 2×pooled RGB differences (scales 4 and 16),
+target-gradient L1, highlight fidelity 0.5, light-footprint fidelity 0.3 and
+sky-masked night-target fidelity 2. The final control has no adversarial or DINO
+term; the matched feature branch adds VGG target loss 0.5. VGG compares relu1_2,
+relu2_2 and relu3_3 after ImageNet RGB standardization, without feature normalization.
+This does **not** remove InstanceNorm from the generator.
+
+| Same 48 validation sources, final EMA | No-VGG control | VGG weight 0.5 |
+|---|---:|---:|
+| Weighted teacher fidelity (lower) | 0.51030 | 0.51034 |
+| Bright-pixel IoU (higher) | 0.41147 | 0.41270 |
+| Extra-bright fraction (lower) | 0.002836 | 0.002818 |
+| Separate-reference sky RGB L1 (lower) | 0.034206 | 0.033902 |
+| Excess sky luminance (lower) | 0.007175 | 0.007367 |
+
+These are internal teacher/mask diagnostics, **not FID, detector mAP or proof of
+real-world relighting accuracy**. The control's best recorded fidelity is about
+0.50819; the table compares equal-length final runs, not cherry-picked checkpoints.
+The teacher's pretraining overlap with BDD is not fully audited, so do not claim
+the external reference is independent of every local validation/test source.
+
+### Current flaws and demo boundaries
+
+Visible sun, sun reflections and daytime cloud glow can survive as false night
+glow. Thin branches/wires/pipes can retain bright fringe pixels because of limited
+spatial resolution, downsampling, imperfect masks and conflicting preservation
+objectives. Lamps may become smeared blobs; invented lights or altered text can
+be inherited from the teacher. Realistic results are strongly scene-dependent.
+Road-scene training does not establish general-purpose indoor/landscape quality.
+The failed inverse mapping is not a supported feature. No SOTA claim is justified.
+
+A zero-initialized full-resolution detail-skip adapter has been implemented and
+unit-tested for identical initial outputs, but **has not been trained**. It is not
+part of the best trained checkpoint and has no demonstrated quality improvement.
+Curated demo inputs must be labeled best-case validation examples, not presented
+as an unbiased benchmark or evidence these limitations have been solved.
+
+The remainder of this document describes the historical V2 architecture and
+earlier failures. References below to bidirectional operation describe training
+history, not the currently supported public feature set. See `CHANGES.md` for
+the experiment chronology and evidence locations.
+
 ## Document purpose
 
 This document describes the architecture that the project should currently continue from,

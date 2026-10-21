@@ -1,0 +1,5 @@
+generator_checkpoint: runs/resize_decoder_pilot/best.pt
+matte_checkpoint: runs/sky_student_regions_v2/best.pt
+maximum_edge: 768
+phase_average: false
+status: experimental_decoder_ablation

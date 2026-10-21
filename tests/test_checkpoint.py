@@ -4,8 +4,8 @@ from pathlib import Path
 
 import torch
 
-from daynight.checkpoint import CheckpointManager
 from daynight import utils
+from daynight.checkpoint import CheckpointManager
 
 
 def test_checkpoint_manager_resolves_and_prunes(tmp_path: Path) -> None:

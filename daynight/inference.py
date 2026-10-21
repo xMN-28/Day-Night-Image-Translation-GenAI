@@ -15,6 +15,9 @@ from .turbo_reference import TurboReference
 from .utils import pil_to_tensor, tensor_to_pil
 
 MODEL_PATHS = {
+    "LumiCycle distilled student": Path(
+        "E:/LumiCycleCache/experiments/turbo_vgg_target_control/best.pt"
+    ),
     "LumiCycle": Path("runs/lumicycle_bdd100k/checkpoints"),
     "LumiCycle V2": Path("runs/lumicycle_v2_bdd100k/checkpoints"),
     "LumiRender": Path("runs/lumirender_physics_bdd100k/checkpoints"),
@@ -74,13 +77,12 @@ class ModelManager:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.loaded_name: str | None = None
         self.checkpoint_path: Path | None = None
+        self.global_step: int | None = None
         self.models: dict[str, torch.nn.Module] | None = None
         self.turbo: TurboReference | None = None
         self.turbo_direction: str | None = None
 
-    def _load_custom(
-        self, model_name: str, checkpoint_override: str | Path | None = None
-    ) -> None:
+    def _load_custom(self, model_name: str, checkpoint_override: str | Path | None = None) -> None:
         environment_name = re.sub(r"[^A-Z0-9]+", "_", model_name.upper()).strip("_")
         configured = os.getenv(f"{environment_name}_CHECKPOINT")
         checkpoint = _resolve_checkpoint(
@@ -93,7 +95,8 @@ class ModelManager:
         ):
             return
         payload = torch.load(checkpoint, map_location=self.device, weights_only=False)
-        models = build_models(payload["config"])
+        self.global_step = payload.get("step")
+        models = {"G_day_night": build_models(payload["config"])["G_day_night"]}
         for name, model in models.items():
             state = payload["models"][name]
             if name in payload.get("ema", {}):
@@ -121,13 +124,13 @@ class ModelManager:
         display_name: str | None = None,
     ) -> tuple[Image.Image, dict[str, Any]]:
         requested_model = display_name or model_name
-        if model_name == "LumiRender" and direction == "night_to_day":
-            model_name = "LumiCycle V2"
+        if direction != "day_to_night":
+            raise ValueError("Only day_to_night is supported. The inverse feature was withdrawn.")
         self._load_custom(model_name, checkpoint_override)
         assert self.models is not None
         padded, crop = _fit_and_pad(image, maximum_edge)
         tensor = pil_to_tensor(padded).unsqueeze(0).to(self.device)
-        generator_name = "G_day_night" if direction == "day_to_night" else "G_night_day"
+        generator_name = "G_day_night"
         started = time.perf_counter()
         amp = (
             torch.autocast(device_type="cuda", dtype=torch.bfloat16)
@@ -163,16 +166,21 @@ class ModelManager:
                 {
                     "night_intensity": float(night_intensity),
                     "seed": int(seed),
-                    "surface_wetness": "automatic" if surface_wetness is None else float(surface_wetness),
+                    "surface_wetness": "automatic"
+                    if surface_wetness is None
+                    else float(surface_wetness),
                 }
             )
-        elif requested_model == "LumiRender":
-            metadata["fallback"] = "Night→day is served by LumiCycle V2."
+        if model_name == "LumiCycle distilled student":
+            metadata["supervision"] = "External CycleGAN-Turbo pseudo-targets; local RGB generator"
+            metadata["global_step"] = self.global_step
         return result, metadata
 
     def translate_turbo(
         self, image: Image.Image, direction: str
     ) -> tuple[Image.Image, dict[str, Any]]:
+        if direction != "day_to_night":
+            raise ValueError("Only day_to_night is supported. The inverse feature was withdrawn.")
         if self.turbo is None or self.turbo_direction != direction:
             self.models = None
             if self.device.type == "cuda":
@@ -211,12 +219,14 @@ def translate(
     normalized = direction.lower().replace(" ", "_").replace("→", "to")
     if normalized in {"day_to_night", "day_to_to_night", "day2night"}:
         normalized = "day_to_night"
-    elif normalized in {"night_to_day", "night_to_to_day", "night2day"}:
-        normalized = "night_to_day"
     else:
-        raise ValueError(f"Unsupported direction: {direction}")
+        raise ValueError("Only Day → Night is supported; the inverse feature was withdrawn.")
     maximum_edge = max(128, min(int(maximum_edge), 1536))
     try:
+        if model_name == "LumiCycle Sky candidate":
+            from .sky_pipeline import translate_sky
+
+            return translate_sky(image, maximum_edge)
         if model_name == "Turbo reference":
             return _MANAGER.translate_turbo(image, normalized)
         if model_name not in MODEL_PATHS:

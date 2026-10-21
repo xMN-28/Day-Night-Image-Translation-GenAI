@@ -28,7 +28,7 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [direction, setDirection] = useState<Direction>("day_to_night");
+  const direction: Direction = "day_to_night";
   const [modelId, setModelId] = useState("v2_best");
   const [maximumEdge, setMaximumEdge] = useState(768);
   const [accessCode, setAccessCode] = useState("");
@@ -172,7 +172,7 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
         <div>
           <p className="eyebrow">REMOTE GPU SHOWCASE</p>
           <h1>LumiCycle</h1>
-          <p>Structure-aware day ↔ night translation, rendered on our home RTX 4070 Super.</p>
+          <p>Day → night translation, rendered on our home RTX 4070 Super.</p>
         </div>
         <div className={`worker-pill ${health.online ? "online" : "offline"}`}>
           <span aria-hidden="true" />
@@ -216,22 +216,13 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
 
           <div className="panel controls-grid">
             <fieldset>
-              <legend>Direction</legend>
+              <legend>Translation</legend>
               <div className="segmented">
                 <button
                   type="button"
-                  className={direction === "day_to_night" ? "active" : ""}
-                  onClick={() => setDirection("day_to_night")}
+                  className="active"
                 >
                   Day → Night
-                </button>
-                <button
-                  type="button"
-                  disabled={!selectedModel.directions.includes("night_to_day")}
-                  className={direction === "night_to_day" ? "active" : ""}
-                  onClick={() => setDirection("night_to_day")}
-                >
-                  Night → Day
                 </button>
               </div>
             </fieldset>
@@ -240,11 +231,7 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
               <select
                 value={modelId}
                 onChange={(event) => {
-                  const nextModel = MODEL_OPTIONS.find((model) => model.id === event.target.value);
                   setModelId(event.target.value);
-                  if (nextModel && !nextModel.directions.includes(direction)) {
-                    setDirection(nextModel.directions[0]);
-                  }
                 }}
               >
                 {MODEL_OPTIONS.map((model) => (
@@ -340,7 +327,9 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
       </section>
 
       <footer>
-        <strong>Academic note:</strong> Every selectable checkpoint was trained locally by the team.
+        <strong>Academic note:</strong> Local checkpoints include an experimental student trained
+        with externally pretrained CycleGAN-Turbo pseudo-targets (not a from-scratch claim).
+        Best results are on road scenes without visible sun or strong solar reflections.
         V2.1 and LumiRender remain visible as documented failed experiments, not claimed improvements.
       </footer>
     </main>

@@ -22,7 +22,11 @@ try {
     Write-Host "LumiCycle remote worker" -ForegroundColor Cyan
     Write-Host "Website: $Server"
     Write-Host "Keep this window open and keep the PC awake during the demonstration."
-    python -m daynight.remote_worker --poll-seconds $PollSeconds
+    $workerPython = Join-Path $projectRoot ".venv\Scripts\python.exe"
+    if (-not (Test-Path -LiteralPath $workerPython)) {
+        throw "Project Python environment is missing. Run the setup instructions first."
+    }
+    & $workerPython -m daynight.remote_worker --poll-seconds $PollSeconds
 }
 finally {
     Pop-Location

@@ -25,10 +25,19 @@ CSS = """
 
 def _model_choices() -> list[str]:
     choices = ["LumiCycle V2", "LumiCycle", "CycleGAN", "Turbo reference"]
+    from daynight.inference import MODEL_PATHS
+
+    if MODEL_PATHS["LumiCycle distilled student"].is_file():
+        choices.insert(1, "LumiCycle distilled student")
+    if (
+        Path("runs/lumicycle_v2_skygan_pilot/latest.pt").is_file()
+        and Path("runs/sky_student_regions_v2/best.pt").is_file()
+    ):
+        choices.insert(0, "LumiCycle Sky candidate")
     acceptance = Path("runs/lumirender_physics_bdd100k/acceptance.json")
-    accepted = acceptance.exists() and json.loads(
-        acceptance.read_text(encoding="utf-8")
-    ).get("passed")
+    accepted = acceptance.exists() and json.loads(acceptance.read_text(encoding="utf-8")).get(
+        "passed"
+    )
     experimental = os.getenv("LUMIRENDER_EXPERIMENTAL") == "1"
     if accepted or experimental:
         choices.insert(0, "LumiRender")
@@ -37,7 +46,6 @@ def _model_choices() -> list[str]:
 
 def run_translation(
     image: Image.Image,
-    direction: str,
     model: str,
     maximum_edge: int,
     night_intensity: float,
@@ -48,7 +56,7 @@ def run_translation(
         wetness = None if surface_wetness < 0 else surface_wetness
         output, metadata = translate(
             image,
-            direction,
+            "day_to_night",
             model,
             maximum_edge,
             night_intensity=night_intensity,
@@ -63,12 +71,12 @@ def run_translation(
 
 
 def build_app() -> gr.Blocks:
-    block_options = {"title": "LumiCycle — Day ↔ Night"}
+    block_options = {"title": "LumiCycle — Day → Night"}
     if GRADIO_MAJOR < 6:
         block_options["css"] = CSS
     with gr.Blocks(**block_options) as demo:
         gr.HTML(
-            "<section class='hero'><h1>LumiCycle</h1><p>Structure-aware, bidirectional day ↔ night translation trained on unpaired driving scenes.</p></section>"
+            "<section class='hero'><h1>LumiCycle</h1><p>Day → night translation. Best results on road scenes without direct sun or strong solar reflections.</p></section>"
         )
         with gr.Row(equal_height=True):
             with gr.Column(scale=1):
@@ -80,15 +88,12 @@ def build_app() -> gr.Blocks:
                     height=390,
                 )
                 with gr.Row():
-                    direction = gr.Radio(
-                        ["Day → Night", "Night → Day"], value="Day → Night", label="Direction"
-                    )
                     models = _model_choices()
                     model = gr.Dropdown(
                         models,
                         value="LumiRender" if "LumiRender" in models else "LumiCycle V2",
                         label="Model",
-                        info="Turbo is an externally pretrained benchmark.",
+                        info="Distilled student uses external Turbo training targets. Sky candidate is a hybrid. Turbo is an external reference.",
                     )
                 maximum_edge = gr.Slider(
                     256, 1024, value=768, step=64, label="Maximum inference edge"
@@ -117,14 +122,13 @@ def build_app() -> gr.Blocks:
                 else:
                     slider = gr.Gallery(label="Before / after", columns=2, rows=1, height=320)
                 status = gr.Markdown(
-                    "Upload an image and choose a direction.", elem_classes="status"
+                    "Upload a daytime image and choose a model.", elem_classes="status"
                 )
 
         run.click(
             run_translation,
             inputs=[
                 input_image,
-                direction,
                 model,
                 maximum_edge,
                 night_intensity,
@@ -139,7 +143,8 @@ def build_app() -> gr.Blocks:
         gr.Markdown(
             "**Academic note:** LumiRender is available here as an experimental checkpoint preview "
             "until its acceptance suite is complete. LumiCycle and CycleGAN are locally trained "
-            "project models; Turbo is an externally pretrained reference."
+            "project models. The distilled student uses external Turbo pseudo-target supervision; "
+            "Turbo itself is an externally pretrained reference. Day → Night only."
         )
     return demo
 

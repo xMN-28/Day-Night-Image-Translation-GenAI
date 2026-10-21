@@ -7,7 +7,7 @@ const mono = Geist_Mono({ variable: "--font-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "LumiCycle — Remote GPU Demo",
-  description: "Day and night image translation powered by a remote RTX 4070 Super.",
+  description: "Day-to-night image translation powered by a remote RTX 4070 Super.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

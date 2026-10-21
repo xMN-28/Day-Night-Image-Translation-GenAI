@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 
@@ -15,9 +15,17 @@ def _records(image_root: Path, timestamp_path: Path) -> list[tuple[datetime, Pat
         filename = parts[0]
         path = image_root / timestamp_path.stem / filename
         if path.exists():
-            # Some AMOS metadata files use a day counter rather than YYYYMMDD.
-            # The capture filename itself is consistent across this Kaggle subset.
-            stamp = datetime.strptime(Path(filename).stem, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)
+            # Use the metadata's adjusted clock, NOT the filename clock. Their
+            # hours differ by camera; treating filename hours as local time
+            # created visibly daytime "night" targets in the original cache.
+            # A relative metadata day counter can fall back to filename DATE,
+            # but must never silently replace the annotated hour/minute.
+            try:
+                date = datetime.strptime(parts[1], "%Y%m%d")  # noqa: DTZ007 -- camera wall time, unknown zone
+            except ValueError:
+                date = datetime.strptime(Path(filename).stem, "%Y%m%d_%H%M%S")  # noqa: DTZ007
+            hour, minute = int(parts[2]), int(parts[3])
+            stamp = date.replace(hour=hour, minute=minute, second=0, microsecond=0)
             records.append((stamp, path.resolve()))
     return records
 
@@ -29,8 +37,10 @@ def write_amos_pairs(root: Path, output: Path, max_pairs: int = 10_000) -> int:
     pairs: list[tuple[Path, Path]] = []
     for timestamp_path in sorted(timestamp_root.glob("*.txt")):
         records = _records(image_root, timestamp_path)
-        days = [(stamp, path) for stamp, path in records if 9 <= stamp.hour <= 16]
-        nights = [(stamp, path) for stamp, path in records if stamp.hour <= 5 or stamp.hour >= 21]
+        # Conservative clock bands still require image review: clock time is
+        # not solar elevation, and camera exposure/weather can vary.
+        days = [(stamp, path) for stamp, path in records if 10 <= stamp.hour <= 14]
+        nights = [(stamp, path) for stamp, path in records if stamp.hour <= 3 or stamp.hour >= 22]
         if not days:
             continue
         for night_stamp, night_path in nights:

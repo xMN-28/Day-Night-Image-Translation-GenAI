@@ -1,0 +1,8 @@
+# Isolated E:\LumiCycleCache\turbo-env only; never install over the main environment.
+# Reuses the main environment's existing CUDA torch/torchvision/common dependencies.
+diffusers==0.25.1
+peft==0.11.1
+transformers==4.44.2
+huggingface-hub==0.25.2
+tokenizers==0.19.1
+accelerate==0.33.0

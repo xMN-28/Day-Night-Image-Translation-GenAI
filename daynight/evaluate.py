@@ -19,8 +19,8 @@ from .utils import atomic_json_dump, tensor_to_pil
 def load_generators(checkpoint_path: str | Path, device: torch.device):
     checkpoint_path = _resolve_checkpoint(checkpoint_path)
     payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    models = build_models(payload["config"])
-    for name in ("G_day_night", "G_night_day"):
+    models = {"G_day_night": build_models(payload["config"])["G_day_night"]}
+    for name in ("G_day_night",):
         if name not in models:
             continue
         state = payload["models"][name]

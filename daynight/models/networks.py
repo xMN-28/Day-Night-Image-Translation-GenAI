@@ -47,17 +47,47 @@ class CBAM(nn.Module):
         return self.spatial(self.channel(x))
 
 
-class ResnetBlock(nn.Module):
-    def __init__(self, channels: int, attention: bool = False) -> None:
+class InstanceLayerNorm(nn.Module):
+    """ILN ablation, initialized to the existing InstanceNorm function.
+
+    Learned channelwise mixture/affine parameters, not input-conditioned AdaLIN.
+    Project rho into [0,1] after optimizer updates. No pretrained convolution
+    parameters are discarded when this parameter-free IN replacement is added.
+    """
+
+    def __init__(self, channels: int):
         super().__init__()
+        self.rho = nn.Parameter(torch.ones(1, channels, 1, 1))
+        self.gamma = nn.Parameter(torch.ones(1, channels, 1, 1))
+        self.beta = nn.Parameter(torch.zeros(1, channels, 1, 1))
+
+    def forward(self, x):
+        instance = F.instance_norm(x, eps=1e-5)
+        work = x.float()
+        mean = work.mean((1, 2, 3), keepdim=True)
+        var = work.var((1, 2, 3), unbiased=False, keepdim=True)
+        layer = (work - mean) * torch.rsqrt(var + 1e-5)
+        rho = self.rho.clamp(0, 1)
+        output = rho * instance + (1 - rho) * layer
+        return (output * self.gamma + self.beta).to(x.dtype)
+
+
+class ResnetBlock(nn.Module):
+    def __init__(
+        self, channels: int, attention: bool = False, normalization: str = "instance"
+    ) -> None:
+        super().__init__()
+        if normalization not in {"instance", "iln"}:
+            raise ValueError(f"Unknown residual normalization: {normalization}")
+        norm = InstanceLayerNorm if normalization == "iln" else nn.InstanceNorm2d
         self.block = nn.Sequential(
             nn.ReflectionPad2d(1),
             nn.Conv2d(channels, channels, 3, bias=False),
-            nn.InstanceNorm2d(channels),
+            norm(channels),
             nn.ReLU(inplace=True),
             nn.ReflectionPad2d(1),
             nn.Conv2d(channels, channels, 3, bias=False),
-            nn.InstanceNorm2d(channels),
+            norm(channels),
         )
         self.attention = CBAM(channels) if attention else nn.Identity()
 
@@ -65,11 +95,37 @@ class ResnetBlock(nn.Module):
         return x + self.attention(self.block(x))
 
 
+class ResizeConv2d(nn.Conv2d):
+    """Nearest-neighbor resize, reflection context, then learned convolution."""
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = F.interpolate(x, scale_factor=2, mode="nearest")
+        return super().forward(F.pad(x, (1, 1, 1, 1), mode="reflect"))
+
+
 class ResnetGenerator(nn.Module):
     """CycleGAN ResNet generator with optional LumiCycle bottleneck attention."""
 
-    def __init__(self, base_channels: int = 64, blocks: int = 9, attention: bool = False) -> None:
+    def __init__(
+        self,
+        base_channels: int = 64,
+        blocks: int = 9,
+        attention: bool = False,
+        upsampling: str = "transpose",
+        residual_norm: str = "instance",
+        detail_skip: bool = False,
+    ) -> None:
         super().__init__()
+        if upsampling not in {"transpose", "resize"}:
+            raise ValueError(f"Unsupported generator upsampling: {upsampling}")
+
+        def upconv(inc, out):
+            if upsampling == "resize":
+                return ResizeConv2d(inc, out, 3, padding=0, bias=False)
+            return nn.ConvTranspose2d(
+                inc, out, 3, stride=2, padding=1, output_padding=1, bias=False
+            )
+
         self.stem = nn.Sequential(
             nn.ReflectionPad2d(3),
             nn.Conv2d(3, base_channels, 7, bias=False),
@@ -87,35 +143,39 @@ class ResnetGenerator(nn.Module):
             nn.ReLU(inplace=True),
         )
         self.residuals = nn.ModuleList(
-            [ResnetBlock(base_channels * 4, attention=attention) for _ in range(blocks)]
+            [
+                ResnetBlock(base_channels * 4, attention=attention, normalization=residual_norm)
+                for _ in range(blocks)
+            ]
         )
         self.up1 = nn.Sequential(
-            nn.ConvTranspose2d(
-                base_channels * 4,
-                base_channels * 2,
-                3,
-                stride=2,
-                padding=1,
-                output_padding=1,
-                bias=False,
-            ),
+            upconv(base_channels * 4, base_channels * 2),
             nn.InstanceNorm2d(base_channels * 2),
             nn.ReLU(inplace=True),
         )
         self.up2 = nn.Sequential(
-            nn.ConvTranspose2d(
-                base_channels * 2,
-                base_channels,
-                3,
-                stride=2,
-                padding=1,
-                output_padding=1,
-                bias=False,
-            ),
+            upconv(base_channels * 2, base_channels),
             nn.InstanceNorm2d(base_channels),
             nn.ReLU(inplace=True),
         )
         self.head = nn.Sequential(nn.ReflectionPad2d(3), nn.Conv2d(base_channels, 3, 7), nn.Tanh())
+        self.detail_skip = (
+            nn.Sequential(
+                nn.ReflectionPad2d(1),
+                nn.Conv2d(2 * base_channels + 3, 32, 3),
+                nn.LeakyReLU(0.2, inplace=False),
+                nn.ReflectionPad2d(1),
+                nn.Conv2d(32, 3, 3),
+            )
+            if detail_skip
+            else None
+        )
+        self.reset_detail_skip()
+
+    def reset_detail_skip(self):
+        if self.detail_skip is not None:
+            nn.init.zeros_(self.detail_skip[-1].weight)
+            nn.init.zeros_(self.detail_skip[-1].bias)
 
     def encode_features(self, x: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         features: list[torch.Tensor] = []
@@ -134,10 +194,20 @@ class ResnetGenerator(nn.Module):
     def forward(
         self, x: torch.Tensor, return_features: bool = False
     ) -> torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
+        source = x
         x, features = self.encode_features(x)
         x = self.up1(x)
         x = self.up2(x)
-        output = self.head(x)
+        if self.detail_skip is None:
+            output = self.head(x)
+        else:
+            # Match the legacy decoder's ceil-to-four shape for odd-sized inputs.
+            pad = (0, x.shape[-1] - source.shape[-1], 0, x.shape[-2] - source.shape[-2])
+            source = F.pad(source, pad, mode="reflect")
+            stem = F.pad(features[0], pad, mode="reflect")
+            correction = self.detail_skip(torch.cat((source, stem, x), dim=1))
+            logits = self.head[1](self.head[0](x))
+            output = self.head[2](logits + correction)
         return (output, features) if return_features else output
 
 
@@ -201,9 +271,7 @@ class GlobalDiscriminator(nn.Module):
         layers: list[nn.Module] = []
         for index, (input_channels, output_channels) in enumerate(pairwise(channels)):
             layers.append(
-                spectral_norm(
-                    nn.Conv2d(input_channels, output_channels, 4, stride=2, padding=1)
-                )
+                spectral_norm(nn.Conv2d(input_channels, output_channels, 4, stride=2, padding=1))
             )
             if index:
                 layers.append(nn.InstanceNorm2d(output_channels))
@@ -286,9 +354,7 @@ class LaplacianDetailRefiner(nn.Module):
         translated_low: torch.Tensor,
         source_gradients: torch.Tensor,
     ) -> torch.Tensor:
-        features = torch.cat(
-            (source_band, coarse_band, translated_low, source_gradients), dim=1
-        )
+        features = torch.cat((source_band, coarse_band, translated_low, source_gradients), dim=1)
         prediction = self.head(self.blocks(self.stem(features)))
         transfer = torch.tanh(prediction[:, :1])
         residual = 0.1 * torch.tanh(prediction[:, 1:])
@@ -315,9 +381,7 @@ class LaplacianRefinementGenerator(nn.Module):
         self.register_buffer("gaussian_kernel", (kernel / kernel.sum()).view(1, 1, 5, 5))
         self.register_buffer(
             "sobel_x",
-            torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]]).view(
-                1, 1, 3, 3
-            ),
+            torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]]).view(1, 1, 3, 3),
         )
         self.register_buffer("sobel_y", self.sobel_x.transpose(2, 3).contiguous())
         self.refiners = nn.ModuleList(
@@ -340,7 +404,9 @@ class LaplacianRefinementGenerator(nn.Module):
         current = image
         for _ in range(self.pyramid_levels):
             low = self._blur_down(current)
-            upsampled = F.interpolate(low, size=current.shape[-2:], mode="bilinear", align_corners=False)
+            upsampled = F.interpolate(
+                low, size=current.shape[-2:], mode="bilinear", align_corners=False
+            )
             bands.append(current - upsampled)
             levels.append(current)
             current = low
@@ -444,7 +510,12 @@ def build_models(config: dict) -> dict[str, nn.Module]:
         if detail_refinement
         else {"base_channels": base, "blocks": blocks, "attention": attention}
     )
-    generator_day_to_night = generator_class(**generator_kwargs)
+    day_kwargs = dict(generator_kwargs)
+    if not detail_refinement:
+        day_kwargs["upsampling"] = model_config.get("day_upsampling", "transpose")
+        day_kwargs["residual_norm"] = model_config.get("day_residual_norm", "instance")
+        day_kwargs["detail_skip"] = bool(model_config.get("day_detail_skip", False))
+    generator_day_to_night = generator_class(**day_kwargs)
     generator_night_to_day = generator_class(**generator_kwargs)
     if global_discriminator:
         discriminator_class = LocalGlobalDiscriminator
@@ -467,6 +538,8 @@ def build_models(config: dict) -> dict[str, nn.Module]:
     if detail_refinement:
         generator_day_to_night.reset_refinement()
         generator_night_to_day.reset_refinement()
+    else:
+        generator_day_to_night.reset_detail_skip()
     return models
 
 

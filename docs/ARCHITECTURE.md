@@ -1,5 +1,10 @@
 # LumiCycle Architecture
 
+> Release scope, 21 October 2026: public inference is Day → Night only. Any inverse
+> generator below is a historical cycle-training component, not a supported demo
+> feature. See `CURRENT_MODEL_ARCHITECTURE.md` for the current student/parent
+> distinction and external pseudo-target attribution.
+
 ## LumiRender physics-guided successor
 
 ```mermaid
