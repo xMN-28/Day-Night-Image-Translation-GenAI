@@ -29,8 +29,8 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const direction: Direction = "day_to_night";
-  const [modelId, setModelId] = useState("v2_best");
-  const [maximumEdge, setMaximumEdge] = useState(768);
+  const [modelId, setModelId] = useState("distilled_best");
+  const [maximumEdge, setMaximumEdge] = useState(512);
   const [accessCode, setAccessCode] = useState("");
   const [job, setJob] = useState<PublicJob | null>(null);
   const [jobToken, setJobToken] = useState("");

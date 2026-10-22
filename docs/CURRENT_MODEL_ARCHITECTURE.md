@@ -1,5 +1,45 @@
 # Current Model Architecture and Experiment History
 
+## Integrated sky repair — 22 October 2026
+
+The distilled-student inference option now **includes** the separate sky repair
+stage by default, in both local and home-worker calls. The earlier statement that
+this student runs only RGB generation describes the pre-integration release.
+Its generator checkpoint and global step 30,600 are unchanged. This is an inference
+pipeline improvement, not new training or a newly learned end-to-end generator.
+
+Current flow: EXIF/resize/pad → EMA distilled RGB generator → source-guided local
+sky/vegetation matte → guided foreground/background unmixing → explicit dim
+blue-gray sky composition and thin-edge recovery → crop/export. Matte weights
+are `runs/sky_student_regions_v2/best.pt`, step 7,800. Both learned networks are
+local at inference; external Turbo targets still supplied generator supervision.
+
+Directly attaching the old compositor exposed hard-edged holes around cable
+bundles. The integrated path therefore additionally enables continuous local
+sky-color hole recovery above the observed sky horizon and a narrow source-derived
+boundary band (8-pixel max-pool radius plus 1-pixel smoothing). Full source-edge
+selection avoids blending bright GAN halos back into wires. The foreground
+exposure ceiling in this band is 0.12; historical pipelines retain 0.24 and their
+old default behavior. These are explicit heuristics, not newly trained physics.
+
+Generator InstanceNorm/CBAM/resize-convolution architecture is unchanged. The
+16-phase generator average used by the old transposed-convolution Sky candidate
+is not needed to invoke sky repair and is not added to this resize-decoder path.
+
+`translate(..., sky_repair=False)` or
+`ModelManager.translate_custom(..., sky_repair=False)` retains the exact raw
+student route for controlled comparison. Default metadata reports `sky_repair`,
+matte checkpoint/step, coverage and method. Missing matte weights raise a friendly
+error instead of silently returning an unrepaired output. Historical V2 and other
+comparison checkpoints do not receive this postprocessing.
+
+The local and remote demos default to the student with repair at 512 px. This
+does not establish general quality or eliminate all artifacts: false sky masks,
+uniform-looking skies, dimmed boundary facades, missed disconnected sky, retained
+sun/ground shadows, text changes and non-road failures remain possible. Existing
+raw student galleries are historical; use newly generated repaired comparisons.
+Verification script: `python -m scripts.verify_student_sky_repair`.
+
 ## Current release update — 21 October 2026 (read this first)
 
 The public project is now **day → night only**. Night → day was evaluated and

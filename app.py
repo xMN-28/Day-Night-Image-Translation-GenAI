@@ -91,12 +91,13 @@ def build_app() -> gr.Blocks:
                     models = _model_choices()
                     model = gr.Dropdown(
                         models,
-                        value="LumiRender" if "LumiRender" in models else "LumiCycle V2",
+                        value=("LumiCycle distilled student"
+                               if "LumiCycle distilled student" in models else "LumiCycle V2"),
                         label="Model",
-                        info="Distilled student uses external Turbo training targets. Sky candidate is a hybrid. Turbo is an external reference.",
+                        info="Distilled student includes guided sky repair (hybrid) and uses external Turbo training targets. Turbo is an external reference.",
                     )
                 maximum_edge = gr.Slider(
-                    256, 1024, value=768, step=64, label="Maximum inference edge"
+                    256, 1024, value=512, step=64, label="Maximum inference edge"
                 )
                 with gr.Accordion("LumiRender lighting controls", open=False):
                     night_intensity = gr.Slider(

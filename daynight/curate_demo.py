@@ -39,6 +39,14 @@ def main():
         by_index = {r["validation_index"]: r for r in manifest["records"]}
         if any(i not in by_index for i in selection):
             raise ValueError("Only screened validation images may be selected")
+        if args.showcase.exists() and any(args.showcase.iterdir()):
+            raise FileExistsError(
+                "Showcase folder is not empty. Archive the old selection first to avoid stale samples."
+            )
+        checkpoint = MODEL_PATHS["LumiCycle distilled student"]
+        if digest(checkpoint) != manifest["checkpoint_sha256"]:
+            raise ValueError("Checkpoint changed since screening; regenerate and review candidates first")
+        manager = ModelManager()
         for folder in ("daytime_inputs", "generated_nights", "comparisons"):
             (args.showcase / folder).mkdir(parents=True, exist_ok=True)
         selected = []
@@ -46,16 +54,32 @@ def main():
         for number, index in enumerate(selection, 1):
             row = by_index[index]
             stem = f"{number:02d}_val_{index:04d}.jpg"
-            for folder, key in (("daytime_inputs", "input"),
-                                ("generated_nights", "output"), ("comparisons", "comparison")):
-                shutil.copy2(args.output / row[key], args.showcase / folder / stem)
-            selected.append({**row, "showcase_filename": stem})
-            with Image.open(args.output / row["comparison"]) as panel:
-                panel.thumbnail((510, 170))
-                sheet.paste(panel, (((number - 1) % 2) * 512, ((number - 1) // 2) * 172))
+            shutil.copy2(args.output / row["input"], args.showcase / "daytime_inputs" / stem)
+            # Run the actual JPEG that will be uploaded, not its pre-encoding source.
+            with Image.open(args.showcase / "daytime_inputs" / stem) as uploaded:
+                source = uploaded.convert("RGB")
+            result, metadata = manager.translate_custom(
+                source, "day_to_night", "LumiCycle distilled student", manifest["edge"]
+            )
+            result.save(args.showcase / "generated_nights" / Path(stem).with_suffix(".png"))
+            width, height = source.size
+            panel = Image.new("RGB", (width * 2, height + 24), "#111111")
+            draw = ImageDraw.Draw(panel)
+            draw.text((5, 5), f"VAL {index:04d} - EXACT UPLOAD", fill="white")
+            draw.text((width + 5, 5), "LOCAL STUDENT - 512 PX", fill="white")
+            panel.paste(source, (0, 24))
+            panel.paste(result, (width, 24))
+            panel.save(args.showcase / "comparisons" / stem, quality=95)
+            panel.thumbnail((510, 170))
+            sheet.paste(panel, (((number - 1) % 2) * 512, ((number - 1) // 2) * 172))
+            selected.append({**row, "showcase_filename": stem,
+                             "generated_filename": str(Path(stem).with_suffix(".png")),
+                             "upload_sha256": digest(args.showcase / "daytime_inputs" / stem),
+                             "metadata": metadata})
         sheet.save(args.showcase / "SHOWCASE_CONTACT_SHEET.jpg", quality=95)
         manifest["records"] = selected
         manifest["selection"] = "Manually curated best-case validation demonstrations; not a benchmark"
+        manifest["exact_uploads_rerun"] = True
         (args.showcase / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         print(f"Selected {len(selected)} examples in {args.showcase.resolve()}")
         return

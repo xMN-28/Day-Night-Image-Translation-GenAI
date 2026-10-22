@@ -31,7 +31,7 @@ class RemoteModel:
 
 MODEL_CATALOG = {
     "distilled_best": RemoteModel(
-        "LumiCycle distilled student — experimental",
+        "LumiCycle student + sky repair — experimental",
         "LumiCycle distilled student",
         Path(os.getenv("LUMICYCLE_DISTILLED_STUDENT_CHECKPOINT",
             "E:/LumiCycleCache/experiments/turbo_vgg_target_control/best.pt")),
@@ -180,7 +180,9 @@ class RemoteWorker:
             display_name=spec.label,
         )
         metadata["worker"] = self.worker_name
-        metadata["checkpoint_step"] = spec.checkpoint.stem.removeprefix("step_")
+        metadata["checkpoint_step"] = metadata.get(
+            "global_step", spec.checkpoint.stem.removeprefix("step_")
+        )
 
         encoded = io.BytesIO()
         output.save(encoded, format="JPEG", quality=94, subsampling=0, optimize=True)

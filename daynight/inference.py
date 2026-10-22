@@ -81,6 +81,7 @@ class ModelManager:
         self.models: dict[str, torch.nn.Module] | None = None
         self.turbo: TurboReference | None = None
         self.turbo_direction: str | None = None
+        self.sky_repair = None
 
     def _load_custom(self, model_name: str, checkpoint_override: str | Path | None = None) -> None:
         environment_name = re.sub(r"[^A-Z0-9]+", "_", model_name.upper()).strip("_")
@@ -122,6 +123,7 @@ class ModelManager:
         surface_wetness: float | None = None,
         checkpoint_override: str | Path | None = None,
         display_name: str | None = None,
+        sky_repair: bool = True,
     ) -> tuple[Image.Image, dict[str, Any]]:
         requested_model = display_name or model_name
         if direction != "day_to_night":
@@ -148,6 +150,13 @@ class ModelManager:
                 )
             else:
                 output = generator(tensor)
+        repair_metadata = {}
+        if model_name == "LumiCycle distilled student" and sky_repair:
+            from .sky_repair import SkyRepair
+
+            if self.sky_repair is None:
+                self.sky_repair = SkyRepair()
+            output, repair_metadata = self.sky_repair.apply(tensor, output)
         if self.device.type == "cuda":
             torch.cuda.synchronize()
         elapsed = time.perf_counter() - started
@@ -174,6 +183,12 @@ class ModelManager:
         if model_name == "LumiCycle distilled student":
             metadata["supervision"] = "External CycleGAN-Turbo pseudo-targets; local RGB generator"
             metadata["global_step"] = self.global_step
+            metadata["sky_repair"] = False
+            metadata.update(repair_metadata)
+            metadata["method"] = (
+                "distilled RGB generator + explicit sky repair"
+                if sky_repair else "raw distilled RGB generator (repair disabled)"
+            )
         return result, metadata
 
     def translate_turbo(
@@ -213,6 +228,7 @@ def translate(
     night_intensity: float = 1.0,
     seed: int = 0,
     surface_wetness: float | None = None,
+    sky_repair: bool = True,
 ) -> tuple[Image.Image, dict[str, Any]]:
     if image is None:
         raise ValueError("Upload an image before translating")
@@ -239,6 +255,7 @@ def translate(
             night_intensity,
             seed,
             surface_wetness,
+            sky_repair=sky_repair,
         )
     except torch.OutOfMemoryError as error:
         if torch.cuda.is_available():

@@ -12,15 +12,15 @@ export type ModelOption = {
 export const MODEL_OPTIONS: ModelOption[] = [
   {
     id: "distilled_best",
-    label: "LumiCycle distilled student — experimental",
-    note: "Local RGB model trained with external CycleGAN-Turbo pseudo-targets. Scene-dependent results; sun/glow artifacts remain.",
+    label: "LumiCycle student + sky repair — experimental",
+    note: "Latest local student with guided sky-mask repair (hybrid). External Turbo training targets; some artifacts remain.",
     directions: ["day_to_night"],
     experimental: true,
   },
   {
     id: "v2_best",
     label: "LumiCycle V2 — best (4.5k)",
-    note: "Recommended checkpoint; strongest locally trained result.",
+    note: "Original V2 checkpoint for comparison; no integrated sky repair.",
     directions: ["day_to_night"],
     recommended: true,
   },

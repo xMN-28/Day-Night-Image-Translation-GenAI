@@ -1,5 +1,30 @@
 # Changes and experiment handover — 21 October 2026
 
+## Follow-up implementation — 22 October 2026
+
+The local distilled student now invokes the trained sky/vegetation matte and
+guided analytic sky compositor during inference, including through the remote
+worker. Previously sky masks only supervised its training. Initial integration
+still exposed cutouts around cables, so continuous local sky-color recovery and
+a narrow source-derived edge band were added and tested. Raw inference remains
+available via `sky_repair=False`; no generator weights/step counts were reset.
+Matte model step 7,800 is separate from generator global step 30,600.
+
+Local/web defaults now select the student-plus-repair hybrid at 512 px, with
+explicit external Turbo-target attribution. The metadata identifies repair and
+its matte checkpoint; the worker reports the real numeric generator step rather
+than the checkpoint filename `best`. Existing raw comparisons remain historical.
+Regression tests cover missing weights, no-sky identity, nonvegetation cable holes
+and the manager path used by the worker. Visual smoke tests include the reported
+cable image, bare branches, overhead wires, clear sky and ordinary road scenes.
+This is not a universal sky fix or a learned removal of sun shadows/reflections.
+
+> Showcase correction later in the day: the initial 20-image selection was
+> withdrawn after full-size review exposed cable/sky holes and false glow. The
+> current pack has **14 stronger examples** after screening 500 validation outputs
+> and rerunning/reviewing each selected upload. See `SHOWCASE_SELECTION_REVIEW.md`.
+> Earlier references below to a 20-image pack describe the superseded selection.
+
 ## Read this before presenting
 
 This records the experiment history available at today's handover, including work

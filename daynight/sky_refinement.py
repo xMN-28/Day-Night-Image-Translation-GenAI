@@ -72,7 +72,8 @@ def guided_filter(
 
 
 def refine_sky_alpha(
-    source: torch.Tensor, probability: torch.Tensor, mixture: torch.Tensor | None = None
+    source: torch.Tensor, probability: torch.Tensor, mixture: torch.Tensor | None = None,
+    *, recover_color_holes: bool = False,
 ) -> torch.Tensor:
     """Guided soft mask plus local foreground/background color unmixing.
 
@@ -107,6 +108,20 @@ def refine_sky_alpha(
         transition = torch.maximum(neighborhood * (p > 0.1), mixture * above_horizon * has_sky)
     else:
         transition = transition * (F.max_pool2d(p, 17, 1, 8) > 0.2)
+    if recover_color_holes:
+        # The two-class semantic student can label an entire cable bundle as
+        # foreground, including its bright interior sky. Recover only source
+        # colors close to locally observed, confident sky above its horizon.
+        # Continuous confidence avoids binary p>0.1 cutouts. Dark wires retain
+        # low unmixing alpha; no correction is possible without reliable sky.
+        color_error = (source.float() - background).square().mean(1, True)
+        color_match = ((0.025 - color_error) / 0.020).clamp(0, 1)
+        rows = torch.linspace(0, 1, p.shape[-2], device=p.device)[None, None, :, None]
+        horizon = (rows * reliable).amax((2, 3), True)
+        upper_support = ((horizon + 0.03 - rows) / 0.04).clamp(0, 1)
+        has_sky = (reliable.sum((2, 3), True) > 16).float()
+        recovery = color_match * (bg_mass / 0.04).clamp(0, 1) * upper_support * has_sky
+        transition = torch.maximum(transition, recovery)
     guided = guided_filter(source, p).clamp(0, 1)
     result = alpha.clamp(0, 1) * transition + guided * (1 - transition)
     return result.clamp(0, 1)
@@ -118,6 +133,7 @@ def compose_night(
     alpha: torch.Tensor,
     strength: float = 1.0,
     vegetation: torch.Tensor | None = None,
+    *, recover_thin_edges: bool = False,
 ) -> torch.Tensor:
     """Replace the daylight sky component and recover source fine edges nearby.
 
@@ -128,9 +144,18 @@ def compose_night(
     a = alpha.clamp(0, 1)
     # Smooth spatially varying exposure transfer retains source high frequencies.
     ratio = (box(gray(base), 15) / box(gray(source), 15).clamp_min(0.04)).clamp(0.12, 0.85)
-    clean_foreground = source * ratio.clamp_max(0.24)
+    foreground_ceiling = 0.12 if recover_thin_edges else 0.24
+    clean_foreground = source * ratio.clamp_max(foreground_ceiling)
     near_sky = box(F.max_pool2d(a, 25, 1, 12), 5).clamp(0, 1)
     near = near_sky if vegetation is None else torch.maximum(a, near_sky * vegetation)
+    if recover_thin_edges:
+        # The vegetation class does not include cables. Recover source dark
+        # details in a narrow sky boundary band instead of retaining bright GAN
+        # streaks there. Keep distant facades and foreground lights unchanged.
+        boundary = box(F.max_pool2d(a, 17, 1, 8), 1)
+        # Selecting source-derived edge pixels fully is necessary: a fractional
+        # blend would retain the very bright GAN cable halos being removed.
+        near = torch.maximum(near, (boundary * 10).clamp(0, 1))
     # A dim blue-gray sky with a smooth horizon gradient and retained cloud detail.
     height = source.shape[-2]
     y = torch.linspace(0, 1, height, device=source.device)[None, None, :, None]
@@ -143,7 +168,7 @@ def compose_night(
     known = (a > 0.9).float()
     global_bg = (source * known).sum((2, 3), True) / known.sum((2, 3), True).clamp_min(1)
     daylight_bg = (box(source * known, 63) + 0.003 * global_bg) / (box(known, 63) + 0.003)
-    old_bg = daylight_bg * ratio.clamp_max(0.24)
+    old_bg = daylight_bg * ratio.clamp_max(foreground_ceiling)
     unmix = (clean_foreground - a * old_bg).clamp_min(0)
     mix_result = unmix + a * sky
     # Continuous support prevents small uncertain alpha values from selecting a
@@ -198,7 +223,7 @@ class SkyStudent(nn.Module):
 
 
 @torch.no_grad()
-def predict_matte(student: SkyStudent, source: torch.Tensor):
+def predict_matte(student: SkyStudent, source: torch.Tensor, *, recover_color_holes: bool = False):
     low = F.interpolate(source, (216, 384), mode="bilinear", align_corners=False)
     probabilities = student(low).float().sigmoid()
     probabilities = F.interpolate(
@@ -206,5 +231,5 @@ def predict_matte(student: SkyStudent, source: torch.Tensor):
     )
     sky = connected_sky_support(probabilities[:, :1])
     vegetation = probabilities[:, 1:2] if probabilities.shape[1] > 1 else None
-    alpha = refine_sky_alpha(source, sky, vegetation)
+    alpha = refine_sky_alpha(source, sky, vegetation, recover_color_holes=recover_color_holes)
     return alpha, vegetation
