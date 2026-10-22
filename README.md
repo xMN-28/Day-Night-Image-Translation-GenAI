@@ -4,7 +4,12 @@ For a complete, source-grounded explanation designed for study and viva preparat
 the [LumiCycle Master Guide](docs/PROJECT_MASTER_GUIDE.md). For the compact implemented
 architecture and experiment lineage, see [Current Model Architecture](docs/CURRENT_MODEL_ARCHITECTURE.md).
 
-**Current recommended model:** LumiCycle V2 best (step 4,500) is the active showcase model.
+**Current demo default (22 October 2026):** LumiCycle student + sky repair, at 512 px.
+The trained student (global step 30,600) now runs a local sky/vegetation matte and
+guided sky/edge compositor during inference. This is an explicit hybrid, not new
+generator training; external CycleGAN-Turbo supplied its pseudo-target supervision.
+Metadata reports `sky_repair: true`. Raw student output remains available via
+`sky_repair=False`; original V2 best (step 4,500) remains a comparison model.
 LumiRender was a from-scratch physics-guided experiment with explicit scene factors, Gaussian
 lights, reflections, bloom, and camera simulation, but its trained checkpoint mostly learned global
 darkening and is retained only as a documented negative result. V1, V2.1, and LumiRender remain
@@ -21,7 +26,7 @@ LumiCycle is a college research project for translating daytime road-scene image
 The public demo is **Day → Night only**. The unreliable inverse mapping has been
 withdrawn; inverse generators remain only in historical cycle-training code and
 checkpoints. See [current architecture](docs/CURRENT_MODEL_ARCHITECTURE.md) and
-[changes and experiment results](docs/CHANGES.md). The optional distilled student
+[changes and experiment results](docs/CHANGES.md). The distilled student
 uses external CycleGAN-Turbo pseudo-target supervision and is explicitly labeled.
 
 It includes a locally implemented CycleGAN baseline, the team’s enhanced LumiCycle model, resumable overnight training, quantitative evaluation, an optional external CycleGAN-Turbo benchmark, and an offline Gradio demonstration.

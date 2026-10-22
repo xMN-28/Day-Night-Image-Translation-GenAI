@@ -1,6 +1,9 @@
 # LumiCycle Remote Demo
 
-The supported public mapping is **Day → Night only**. The inverse feature was
+The supported public mapping is **Day → Night only**. The default is now the local
+**student + sky repair** hybrid at 512 px; metadata reports `sky_repair: true`.
+It needs both the generator and `runs/sky_student_regions_v2/best.pt` matte weights.
+The inverse feature was
 withdrawn for poor quality. The optional `distilled_best` model is a local RGB
 student trained with external CycleGAN-Turbo pseudo-targets; it is not the external
 diffusion model itself. Its weights default to E:/LumiCycleCache and may be located
