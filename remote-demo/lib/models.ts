@@ -1,4 +1,4 @@
-export type Direction = "day_to_night";
+export type Direction = "day_to_night" | "night_to_day";
 
 export type ModelOption = {
   id: string;
@@ -10,6 +10,13 @@ export type ModelOption = {
 };
 
 export const MODEL_OPTIONS: ModelOption[] = [
+  {
+    id: "night_day_experimental",
+    label: "LumiCycle night-to-day — experimental (16.5k)",
+    note: "Research preview only: noise, retained glare and lighting artifacts remain. Not an accepted quality release.",
+    directions: ["night_to_day"],
+    experimental: true,
+  },
   {
     id: "distilled_best",
     label: "LumiCycle student + sky repair — experimental",

@@ -1,11 +1,11 @@
 # LumiCycle Master Guide
 
-> Release update, 21 October 2026: the public demo is now **Day → Night only**.
-> The inverse mapping was withdrawn because its outputs were poor. Bidirectional
-> descriptions below explain historical cycle training, not current demo support.
-> Read `CURRENT_MODEL_ARCHITECTURE.md` and `CHANGES.md` first for the newer local
-> student, external Turbo pseudo-target attribution, matched experiment outcomes
-> and unresolved sun/glow artifacts. Original V2 remains the default option.
+> Updated **22 October 2026**. The public demo is **Day → Night only** and defaults
+> to the **distilled student + integrated sky repair**, not original V2.
+> The authoritative architecture snapshot is
+> [FINAL_DAY_NIGHT_ARCHITECTURE.md](../FINAL_DAY_NIGHT_ARCHITECTURE.md).
+> Original cycle training and V2 details below are explicitly historical.
+> Recent experimental night→day work has not changed the day→night model.
 
 ## Understand it, defend it, and demonstrate it without bluffing
 
@@ -17,49 +17,124 @@ best, why several later experiments failed, and what claims the evidence does **
 The current showcase model is:
 
 ```text
-Model family:       LumiCycle V2
-Direction:          Day ↔ Night (two separately trained generators)
-Selected checkpoint: runs/lumicycle_v2_bdd100k/checkpoints/step_00004500.pt
-Checkpoint SHA-256: 13767F7A1735B00A9F3A24568BC6DC10A89306CA4D0369C8B8A6C7CF3542E550
-Recorded step:      4,500 V2 optimizer steps
-Validation score:   0.25634396844543517 (lower is better under our internal score)
-Final V2 checkpoint: step 12,000; it is not the selected best
-Training crop:      256 × 256
-Parameters:         approximately 39.46 million during training
-Inference:          one 11.45-million-parameter generator per direction
+Release:            LumiCycle student + sky repair — experimental
+Public direction:   Day → Night only
+Local model name:   LumiCycle distilled student
+Remote model ID:    distilled_best
+Selected generator: E:\LumiCycleCache\experiments\turbo_vgg_target_control\best.pt
+Recorded step:      30,600 cumulative; EMA G_day_night
+Sky matte:          runs/sky_student_regions_v2/best.pt; step 7,800
+Repair version:     2026-10-22-v1
+Final student data: 512 × 288 pseudo-pairs from an external Turbo teacher
+Demo default:       512 px maximum edge, aspect ratio preserved
+Active parameters:  11,447,541 RGB generator + 1,097,690 matte = 12,545,231
+Inference:          local student + local matte + explicit image compositing
 ```
 
-Do not call this model “V2 5.5k.” The 5,500-step checkpoint belongs to the failed **V2.1**
-experiment. Exact checkpoint names matter when presenting research.
+The generator SHA-256 is
+`1277b23bda9c13bc4797a19f44fa164000060308b5270a2b436c9b6617ce2185`.
+The matte SHA-256 is
+`afb481a22ca789880805398e6a00798be4d89450a0c657e10191c7c454032c83`.
+
+Do not call this “V2 5.5k,” original V2 4.5k, or the recent inverse model.
+Global 30,600 includes continuation stages with different objectives; it does not
+mean 30,600 steps of one unchanged recipe. Best and latest are not interchangeable.
 
 ---
 
 ## 1. The 90-second explanation
 
-> We solve unpaired day-to-night and night-to-day image translation. Our data contains separate
-> collections of daytime and nighttime BDD100K road images, not matching photographs of the same
-> scene. We therefore train two generators: one maps day to night and the other maps night to day.
-> Two target-domain discriminator systems teach realism, while cycle, identity, contrastive,
-> semantic, and edge losses discourage the generators from moving or deleting scene content.
+> We turn a daytime photograph into one plausible nighttime interpretation while trying to
+> preserve the scene. We began with unpaired BDD100K day/night images and a CycleGAN-style system.
+> V1 and V2 taught us that realism and structural preservation can conflict, especially around sky,
+> branches, and wires. Later versions did not automatically improve the result.
 >
-> Our current best model, LumiCycle V2, extends a CycleGAN-style ResNet generator with CBAM
-> attention. Each domain has two spectral-normalized PatchGAN critics for local realism plus a
-> global critic for whole-image illumination. V2 also adds global color statistics and a regional
-> illumination heuristic because V1 often left daytime skies incompletely transformed. It was
-> warm-started from the V1 step-13,000 generator weights, while discriminators and optimizers were
-> reset. V2 step 4,500 is selected by validation; later training did not improve that score.
+> Our current demo uses a small locally implemented nine-block attention ResNet student. We
+> continued trained weights and used outputs from externally pretrained CycleGAN-Turbo as
+> pseudo-targets. The student uses resize-convolution upsampling and retains InstanceNorm.
+> Its selected EMA weights are cumulative step 30,600. A separate locally trained U-Net predicts
+> sky and vegetation; source-guided color unmixing and explicit night-sky compositing repair
+> fine sky boundaries. This repair is now integrated, not a separate optional experiment by default.
 >
-> The result is convincing on many road scenes but it is not physically correct relighting. Its
-> main weaknesses are domain bias, imperfect branches and wires, deterministic output, heavy
-> instance normalization, heuristic rather than semantic sky handling, and unpaired supervision
-> that can reward shortcuts. V2.1 and LumiRender are documented failed ablations, not hidden.
+> At inference both learned networks run locally, without the diffusion teacher or discriminators.
+> The result is a hybrid learned-and-analytic system, not physically exact relighting. Fine wires,
+> sun reflections, light placement, and non-road scenes still fail. Night→day is withdrawn from
+> the public interface; ongoing inverse experiments are separate. We acknowledge external teacher
+> supervision and do not claim a new state-of-the-art algorithm.
 
 If every teammate can explain that paragraph in their own words, the project will no longer sound
 like copied code.
 
+### 1.1 Which algorithm did we use?
+
+CycleGAN is correctly called an algorithm/framework for unpaired image-to-image
+translation, not merely a file or dataset. But **“we use CycleGAN” is incomplete for
+the current release**. Say: “Our project began with CycleGAN-style learning; the
+current day-to-night release uses a teacher-distilled attention ResNet and a
+semantic-matte-guided analytic sky correction.” Distinguish the architecture
+(network structure), training algorithm/objective, and inference pipeline.
+
+### 1.2 Current architecture to memorize
+
+```text
+Day RGB → EXIF/RGB/resize/pad → nine-block CBAM ResNet → raw night RGB
+Source  → SkyStudent U-Net → sky/vegetation → guided soft sky alpha
+                                         ↓
+Raw night + source fine edges + explicit dim sky → final hybrid night image
+```
+
+The RGB student has a 7×7 3→64 stem, two stride-2 downsamplers to 128/256,
+nine 256-channel attention residual blocks, two nearest-neighbor resize + 3×3
+convolution upsamplers to 128/64, and a 7×7 RGB/Tanh head. InstanceNorm remains.
+No full-resolution U-Net skip is active in this RGB network.
+
+SkyStudent is the separate U-Net with skip connections: encoder widths 24/48/96,
+middle 192, decoder 96/48/24, GroupNorm/SiLU blocks, and two output logits. It runs
+at 384×216 internally; its sigmoid maps are upsampled to the inference size.
+
+The compositor recovers nearby sky-colored holes, refines the matte using source
+colors, approximately removes mixed daylight sky, and adds a dim blue-gray sky.
+Source-derived edges suppress bright wire halos; the integrated foreground exposure
+ratio ceiling is 0.12. This is explicit image processing, not a newly trained
+end-to-end physical renderer. Wrong masks or color assumptions still cause errors.
+
+### 1.3 Current final training objective, not the original V2 objective
+
+The selected no-VGG control used aligned **generated** source/target pairs:
+2,048 training and 48 validation daytime sources, with external Turbo night
+pseudo-targets at 512×288. Real corresponding nighttime ground truth was unavailable.
+
+```text
+Fidelity = 10 × RGB L1
+         + 2 × mean(L1 at 4× and 16× average-pooled scales)
+         + mean(horizontal and vertical finite-difference L1)
+Total = Fidelity + 0.5 × Highlight + 0.3 × Footprint + 2 × Sky
+```
+
+Highlight emphasizes bright teacher pixels; Footprint penalizes incorrect sizes
+of bright regions; Sky compares output to the night teacher under a detached local
+sky matte. Exact definitions are in the final architecture document. The final
+control has **no active GAN, cycle, identity, PatchNCE, DINO, or VGG loss**.
+Inherited checkpoint configuration fields are not proof those losses executed.
+
+Final-control settings: Adam LR 1e-4, betas (0.5, 0.999), batch 4, BF16,
+gradient clipping 3, EMA 0.99, and paired random horizontal flips. The selected
+checkpoint is local update 750 after parent 29,850. Do not confuse this EMA decay
+and batch with the historical V2 settings below. Frozen VGG was a separate matched
+ablation with small mixed effects, not the selected model's generator or loss.
+
+### 1.4 How to read the historical teaching material
+
+Sections 2–8 teach the original unpaired problem and V2 training system. They are
+retained because the team should understand its lineage, **not** because the current
+demo trains or executes two generators and critics. Section 9 describes current
+inference; section 10 records experiments; section 11 describes current flaws.
+For exact current checkpoint identity, loss definitions, and limitations, use
+[FINAL_DAY_NIGHT_ARCHITECTURE.md](../FINAL_DAY_NIGHT_ARCHITECTURE.md).
+
 ---
 
-## 2. The problem from first principles
+## 2. The problem from first principles — original unpaired formulation
 
 ### 2.1 What is image-to-image translation?
 
@@ -120,9 +195,13 @@ unnatural private encoding.
 
 ## 3. Dataset and leakage control
 
-### 3.1 What we actually used for the current best model
+### 3.1 Original V1/V2 data and the current student subset
 
 The active V1/V2 family uses BDD100K images whose metadata is exactly `daytime` or `night`.
+
+These are the original domain splits. The current student uses the 2,048/48
+source subset and external pseudo-target cache described in section 1.3, not
+5,000 real aligned day/night pairs. Teacher pretraining overlap with BDD is unknown.
 
 | Split | Day | Night | Purpose |
 |---|---:|---:|---|
@@ -141,10 +220,14 @@ training and a near duplicate enters test, the test is not truly unseen. The pre
 uses perceptual duplicate grouping before assigning groups to splits. All members of a group stay
 within one split.
 
+The retained audit found no source-filename or exact-dHash overlap between project
+train/validation/test partitions. This is not proof against all near-duplicate
+video frames: exact hash agreement is narrower than complete sequence-level leakage analysis.
+
 This is one of our direct methodological improvements over any procedure that uses test examples
 for architecture selection. Validation data can influence model selection; test data must not.
 
-### 3.3 What a training sample looks like
+### 3.3 What an original unpaired V2 training sample looks like
 
 The loader chooses one day image and one independently selected night image. They are not assumed
 to align. During training it:
@@ -179,7 +262,7 @@ the same code run far more slowly even on a computer containing an NVIDIA GPU.
 
 ---
 
-## 4. Exact LumiCycle V2 architecture
+## 4. Historical LumiCycle V2 architecture — not the current complete pipeline
 
 ### 4.1 System view
 
@@ -306,7 +389,7 @@ convolutions, not to the generator.
 
 ---
 
-## 5. Every V2 loss, exactly and intuitively
+## 5. Historical V2 losses, exactly and intuitively
 
 The total generator loss is:
 
@@ -433,7 +516,7 @@ presence of many losses.
 
 ---
 
-## 6. One complete training iteration
+## 6. One historical V2 training iteration
 
 This is the clearest way to prove that you understand the implementation.
 
@@ -482,7 +565,7 @@ images and does not learn additional parameters.
 
 ---
 
-## 7. Optimization, checkpointing, and exact resumption
+## 7. Historical V2 optimization, checkpointing, and resumption
 
 ### 7.1 Training settings
 
@@ -552,7 +635,7 @@ future 384–768 px experiments and heavier teachers can scale memory sharply.
 
 ---
 
-## 8. What “best checkpoint” really means
+## 8. What “best checkpoint” means — historical V2 example
 
 V2 validation ran every 500 steps. The internal score reached its minimum at step 4,500:
 
@@ -607,21 +690,42 @@ Never claim that V2 has proven state-of-the-art performance or statistically pro
 4. Dimensions are reflection-padded to a generator-safe multiple.
 5. Pixels are normalized to `[-1,1]`.
 6. The requested EMA generator runs under inference mode and mixed precision on CUDA.
-7. Output is converted back to `[0,255]`, padding is removed, and metadata is returned.
+7. For the selected student, the frozen local sky/vegetation network estimates a
+   source-guided matte; integrated compositing repairs sky and thin boundaries.
+8. Output is converted back to `[0,255]`, padding is removed, and metadata is returned.
 
 The stable API is:
 
 ```python
-translate(image, direction, model_name) -> (output_image, metadata)
+from PIL import Image
+from daynight.inference import translate
+
+output_image, metadata = translate(
+    Image.open("input.jpg"),
+    "day_to_night",
+    model_name="LumiCycle distilled student",
+    maximum_edge=512,
+    sky_repair=True,
+)
+output_image.save("night_output.png")
 ```
 
-Training at 256 px does not forbid larger inference, because the generator is fully convolutional.
-It does mean 512–768 px is outside the exact training scale and cannot create detail the model
-never learned.
+The UI explicitly selects student + repair at 512 maximum edge. The bare Python
+helper retains legacy defaults of `model_name="LumiCycle"` and maximum edge 768;
+explicit arguments above reproduce the current demo rather than that older route.
+The selected student was trained at 512×288 in its final stage; original V2 used
+256 px crops. Fully convolutional inference permits other dimensions but does not
+guarantee equal quality at every scale.
+
+The integrated repair is enabled by default for the student. Missing matte weights
+raise an error; they do not silently fall back to raw output. `sky_repair=False`
+is an explicit raw-student ablation. Confirm metadata reports repair version
+`2026-10-22-v1`, `sky_repair: true`, and matte step 7,800. Other comparison models
+do not automatically receive the same repair. The public API rejects night→day.
 
 ### 9.2 Remote college demo architecture
 
-The public Vercel page does not run PyTorch or the 600 MB checkpoint. It supplies the interface,
+The public Vercel page does not run PyTorch or host the GPU model. It supplies the interface,
 temporary image storage, and job coordination. The home-PC worker polls the queue over outbound
 HTTPS, downloads the input, runs the chosen local checkpoint on the RTX 4070 Super, uploads the
 result, and returns metadata. This avoids exposing the home router and lets a low-power college
@@ -636,7 +740,7 @@ sequenceDiagram
     Browser->>Web: Upload image and select model
     Worker->>Web: Poll for queued job
     Web-->>Worker: Input URL and settings
-    Worker->>GPU: Run local EMA generator
+    Worker->>GPU: Run selected student and sky-matte repair
     GPU-->>Worker: Translated image
     Worker->>Web: Upload result and mark complete
     Web-->>Browser: Display result
@@ -644,6 +748,11 @@ sequenceDiagram
 
 If the home PC sleeps, loses internet, or the worker is closed, the website remains visible but no
 job can complete. The presenter should test the worker and carry screenshots as backup.
+
+The latest retained browser check loaded the correct hybrid label but showed an
+offline worker; it did not establish current remote generation availability.
+Before presenting, complete a real upload and inspect its returned model/repair
+metadata. A visible website alone does not prove the worker uses the latest code.
 
 ---
 
@@ -653,9 +762,13 @@ job can complete. The presenter should test the worker and carry screenshots as 
 |---|---|---|---|
 | CycleGAN baseline | 9-block ResNet, one PatchGAN/domain, GAN+cycle+identity | From scratch | Conceptual baseline; no complete retained main-run result to invent numbers for |
 | LumiCycle V1 | CBAM, two-scale spectral PatchGAN, PatchNCE, DINO, Sobel, EMA | From scratch | Convincing night style; best 13k, final 40k degraded |
-| **LumiCycle V2** | Global critic, color/illumination losses, lower identity, slower critics | V1 13k generators | **Current best: V2 4.5k** |
+| LumiCycle V2 | Global critic, color/illumination losses, lower identity, slower critics | V1 13k generators | Historical preferred checkpoint: V2 4.5k; final 12k not selected |
 | LumiCycle V2.1 | Laplacian refiners, Haar critics, stronger structure/detail losses | V2 4.5k | Failed: retained daylight/twilight appearance |
 | LumiRender | Factorizer, Gaussian lights, reflections, bloom, camera simulation | From scratch | Failed: mostly learned global darkening |
+| Distilled RGB student | Locally implemented attention ResNet with resize-convolution; external Turbo pseudo-targets | Continued trained generator lineage | Selected EMA global 30,600; raw output still has sky/detail errors |
+| VGG feature-loss branch | Matched frozen feature supervision, not a VGG generator | Shared student parent 29,850 | Small mixed effects, not a clear overall win; no-VGG control selected |
+| **Student + integrated sky repair** | Local sky/vegetation U-Net, guided unmixing, explicit sky and thin-edge repair | Same student 30,600 + matte 7,800 | **Current default**; inference integration, not new generator training |
+| Experimental night→day | Inverse warm starts, target audits and bounded adaptation | Separate retained inverse weights | Not promoted; no change to public day→night release |
 
 ### 10.1 Standard CycleGAN baseline
 
@@ -704,10 +817,11 @@ self-similarity, residual preservation, and detail-biased sampling. It started f
 froze the base during a warm-up, and later fine-tuned at very low learning rate and higher
 resolution.
 
-The architectural idea focused on branches and fine detail. The actual failure was objective
-imbalance: it protected source high-frequency structure so strongly that the main illumination
-change weakened. Its output often looked like twilight or filtered daytime. Also, sky correction
-is fundamentally low-frequency; a high-frequency refiner cannot fix the most important error.
+The architectural idea focused on branches and fine detail. Its output often looked
+like twilight or filtered daytime. A plausible explanation is objective imbalance:
+protecting source high-frequency structure can weaken the main illumination change.
+This was not isolated as the sole cause by a controlled causal experiment. A
+high-frequency refiner alone also cannot determine the required broad sky illumination.
 
 The best pointer is V2.1 step 5,500 and final is 6,000. Both are kept as a negative ablation, not
 presented as progress.
@@ -718,46 +832,61 @@ LumiRender began from scratch and attempted explicit scene factorization, Gaussi
 specular/reflection rendering, bloom, and a differentiable camera pipeline. This was motivated by
 physical image formation and 2D Gaussian illumination—not 3D Gaussian splatting.
 
-The factorization was not identifiable from weak/unpaired supervision. Many combinations of
+The observed output mainly darkened the image instead of convincingly relighting it.
+A plausible explanation is ambiguous factorization under weak/unpaired supervision. Many combinations of
 albedo, illumination, residual correction, and camera exposure can explain the same output. The
-easiest optimization shortcut was global darkening. A sophisticated renderer does not force
+possible optimization shortcut is global darkening. A sophisticated renderer does not force
 correct factor discovery when supervision does not uniquely reward it. Its final 34,004-step
 checkpoint is scientifically useful as a failed experiment but worse for the demo than V2.
+
+Planned factorization/paired-data quality gates do not establish that those stages
+were successfully learned. Treat shortcut explanations as hypotheses, not a proven
+audit of every latent factor or the sole reason for failure.
 
 ---
 
 ## 11. Current model flaws—what the professor may notice
 
-### 11.1 Heavy InstanceNorm may remove day/night evidence
+### 11.1 InstanceNorm is still present
 
 The generator normalizes after the stem, both downsamplers, twice in every residual block, and both
 upsamplers. InstanceNorm removes per-image channel mean and variance, yet mean brightness, contrast,
 and color balance are central day/night clues. The network must reconstruct those statistics later.
 This may contribute to flat tinting or incomplete exposure conversion.
 
-### 11.2 There is no true semantic sky or emitter model
+This is a plausible tradeoff, not a proven sole cause of artifacts. The external
+repository's “VGG16 no normalization” result is not evidence our generator removed
+InstanceNorm; it did not.
 
-CBAM is not a segmentation system. Regional illumination only assumes bright upper pixels are
-probably sky. The model receives no explicit labels for sky, glass, road, lamps, windows, or
-reflections. It can darken a sky but cannot reason explicitly about where a new light should exist.
+### 11.2 A semantic matte is not a complete lighting model
 
-### 11.3 The loss has an internal conflict
+The current pipeline **does** predict semantic sky and vegetation, unlike original
+V2's vertical/luminance heuristic. But CBAM itself is not segmentation, and the
+pipeline still has no explicit validated emitter, material, geometry, or sun model.
+It cannot establish where real night lights should turn on or how all reflections change.
 
-GAN, color, and illumination demand change. Cycle, identity, PatchNCE, DINO, and Sobel demand
-preservation. Branches against sky are precisely where both demands meet. Too little preservation
-causes halos and shifted branches; too much produces daylight with a dark filter.
+### 11.3 Fine sky holes and edge halos remain possible
 
-### 11.4 The target image is unrelated
+The matte network works at 384×216, so tiny branches and pipes can be subpixel.
+Color-hole recovery needs reliable neighboring sky and can confuse pale foreground
+with sky. Guided unmixing is approximate. The fix is now integrated, but “integrated”
+does not mean all thin-detail cases are solved. Strong source-edge recovery can
+also over-darken facades and branches near the boundary.
 
-Color and regional illumination compare generated statistics with an unrelated real night image.
-Different weather, camera response, and composition add noise. The easiest common feature may be
-“make everything dark,” not “relight this exact scene correctly.”
+### 11.4 Generated targets are not real night ground truth
 
-### 11.5 Discriminator shortcuts
+The final student target corresponds spatially to the source because an external
+teacher generated it, unlike original V2's unrelated real night sample. That makes
+pixel losses possible but also transfers teacher mistakes, glare, hallucinated
+lights, and imperfect geometry. Low teacher-matching error is not physical correctness.
 
-Critics see whether an output resembles the target distribution, not whether each source object
-was preserved. DiffAugment also teaches invariance to brightness and saturation—two signals the
-domain task needs. The global critic improves coherence but remains unconditioned on the input.
+### 11.5 Earlier adversarial shortcuts are historical, not the final loop
+
+Original unconditioned critics could reward plausible night style without preserving
+each source object; brightness/color augmentation was also a questionable invariance
+for this task. These explain the motivation for experiments. The selected final
+control has **no discriminator updates**; its present weaknesses must not all be
+attributed to an adversarial loss that is no longer active in that stage.
 
 ### 11.6 Quarter-resolution bottleneck and no long U-Net skips
 
@@ -765,28 +894,36 @@ Thin branches, wires, text, and distant objects can disappear during two downsam
 blocks preserve bottleneck information, but there are no direct encoder-to-decoder skip
 connections at full and half resolution.
 
-### 11.7 Transposed-convolution artifacts
+### 11.7 Resize-convolution does not restore discarded information
 
-The decoder uses transposed convolution. Uneven overlap can contribute to checkerboard, ringing,
-or color fringe artifacts. Resize-convolution with anti-aliasing is a reasonable future ablation.
+Original V2 used transposed convolutions. The selected student already uses
+nearest-neighbor resizing followed by reflected convolution. This changes decoder
+overlap behavior but does not restore all encoder-lost wires or guarantee no halos.
+Do not propose the already implemented replacement as an untouched future feature.
 
-### 11.8 Simplified content metrics
+### 11.8 Analytic sky and retained daylight cues
 
-PatchNCE has no learned projection heads. DINO is resized to 224 px. Sobel is grayscale. This
-combination may miss colored halos, tiny text, thin wires, local hallucination, and incorrect lamp
-placement.
+The compositor uses a dim blue-gray gradient with weak source cloud texture, not
+physically recovered night radiance. It can look uniform or mismatched. Direct sun,
+solar reflections and cast shadows may remain because they are not explicitly
+identified and removed. Foreground bloom, signage changes, and invented lighting
+are outside the sky repair's scope.
 
 ### 11.9 Deterministic output for an ambiguous future
 
-One daytime photograph has many valid nights. V2 produces one deterministic result and cannot
+One daytime photograph has many valid nights. The selected student produces one deterministic result and cannot
 control wetness, window patterns, lamp state, moonlight, or exposure. The fixed answer may be
 plausible, but it is not the unknowable true future night.
 
 ### 11.10 “Best” validation is incomplete
 
-The score emphasizes recoverability and structure and includes inherited wavelet/self-similarity
-defaults. It lacks a completed blind preference study and full final test table. The current model
-is selected engineering evidence, not a state-of-the-art scientific result.
+Original V2 used a recoverability/structure-oriented score with inherited defaults.
+The selected student instead records weighted teacher fidelity (approximately
+0.50819 at its selected checkpoint), which is not an accuracy percentage. Raw-student
+metrics do not alone evaluate the later hybrid compositor. A completed blind
+preference study and full final-test FID/KID/object-retention table are not established.
+The 14 curated hybrid showcase examples are demonstrations, not a random benchmark.
+The current model is engineering evidence, not a state-of-the-art scientific result.
 
 ---
 
@@ -801,6 +938,10 @@ is selected engineering evidence, not a state-of-the-art scientific result.
 - PatchGAN, spectral normalization, replay buffers, EMA, DiffAugment, and LSGAN: established ML
   techniques.
 - BDD100K: external licensed dataset.
+- CycleGAN-Turbo and its pretrained diffusion backbone: external generation used
+  to produce student pseudo-targets, not invented or trained from scratch by the team.
+- U-Net, GroupNorm, guided filtering, and foreground/background compositing:
+  established architectural and image-processing ideas.
 - The supplied research paper: starting motivation, not code ownership.
 
 ### Our project contribution
@@ -814,6 +955,9 @@ is selected engineering evidence, not a state-of-the-art scientific result.
 - atomic full-state resume, plateau diagnostics, rollback, LR reduction, and live monitoring;
 - controlled model comparison and documentation of negative ablations;
 - local Gradio inference and the Vercel/queue/home-GPU remote demonstration system.
+- continuation/distillation experiments, matched VGG/no-VGG comparison, resize-decoder
+  adaptation, local semantic matte, and integrated sky-hole/thin-edge repair;
+- explicit separation of raw generator quality from the analytic compositor's effect.
 
 The honest claim is **engineering integration plus experimentally motivated modifications**, not
 invention of GANs, CycleGAN, attention, DINO, or inverse rendering. Reimplementation and ablation
@@ -822,12 +966,13 @@ are legitimate college research when attribution and evidence are clear.
 ### How to respond to “Did you copy this?”
 
 > We built on published components and cite them; pretending otherwise would be wrong. What we can
-> explain and defend is our implementation, dataset split, integration, V1-to-V2 design decision,
-> training safeguards, failed ablations, and deployment. For example, V2 was not an arbitrary new
-> network: V1’s local critics left bright skies, so we added a whole-frame critic and regional
-> illumination objective, lowered identity pressure, and reset saturated discriminators while
-> retaining generator weights. The result improved qualitatively, but our metric and supervision
-> still have limitations that we document.
+> explain and defend is our implementation, dataset split, warm-start experiments,
+> training safeguards, failed ablations, and deployment. Our current small student
+> also learns from external Turbo-generated targets, which we explicitly acknowledge.
+> We compared a VGG-loss branch against a matched control and integrated a local
+> sky/vegetation matte with source-guided compositing to reduce sky holes. We can
+> show the generator, active loss, checkpoints, and failure cases in the repository.
+> That is engineering and experimental work, not a claim we invented the underlying methods.
 
 ---
 
@@ -838,8 +983,11 @@ Open these files while studying. Be able to point to an implementation, not mere
 | Topic | Source |
 |---|---|
 | V2 hyperparameters | [`configs/lumicycle_v2.yaml`](../configs/lumicycle_v2.yaml) |
-| CBAM and generator | [`daynight/models/networks.py`](../daynight/models/networks.py), lines 12–141 |
-| Patch/global critics | [`daynight/models/networks.py`](../daynight/models/networks.py), lines 144–225 |
+| Current architecture snapshot | [`FINAL_DAY_NIGHT_ARCHITECTURE.md`](../FINAL_DAY_NIGHT_ARCHITECTURE.md) |
+| CBAM, RGB generator, resize decoder | [`daynight/models/networks.py`](../daynight/models/networks.py) |
+| Historical Patch/global critics | [`daynight/models/networks.py`](../daynight/models/networks.py) |
+| Integrated repair routing and metadata | [`daynight/sky_repair.py`](../daynight/sky_repair.py) |
+| Matte U-Net, color-hole recovery, explicit compositor | [`daynight/sky_refinement.py`](../daynight/sky_refinement.py) |
 | LSGAN and PatchNCE | [`daynight/losses.py`](../daynight/losses.py), lines 12–64 |
 | Sobel and DINO | [`daynight/losses.py`](../daynight/losses.py), lines 67–112 |
 | DiffAugment/color/illumination | [`daynight/losses.py`](../daynight/losses.py), lines 115–196 |
@@ -859,15 +1007,77 @@ Open these files while studying. Be able to point to an implementation, not mere
 
 ## 14. Professor-style questions and answers
 
+### Current release — learn these first
+
+**Q: Is CycleGAN an algorithm, or what exactly did you use?**
+
+A: CycleGAN is an unpaired translation algorithm/framework used in our original
+training. The current release uses a teacher-distilled attention ResNet plus a
+local semantic matte and explicit sky compositor. Calling the current complete
+pipeline only “CycleGAN” omits its later changes.
+
+**Q: Are you using someone else's pretrained model?**
+
+A: Yes, external CycleGAN-Turbo generated training pseudo-targets. We acknowledge
+that dependency. The demo runs our local student and local matte, not the diffusion
+teacher, but training is not independent of externally pretrained generation.
+
+**Q: What is the current loss?**
+
+A: The final selected control uses RGB, pooled-scale and finite-difference teacher
+fidelity, plus highlight, bright-footprint and sky losses. It does not currently
+train with the original V2 cycle/adversarial/identity/PatchNCE/DINO recipe.
+
+**Q: Is the sky fix actually inside the latest model?**
+
+A: It is integrated into the current student's inference pipeline by default,
+but not baked into newly retrained generator weights. A separate frozen sky U-Net
+and analytic compositor execute after RGB generation. We expose this in metadata.
+
+**Q: Why can white holes remain after the fix?**
+
+A: A low-resolution semantic matte can miss tiny gaps. Source-color recovery is
+local and approximate; it cannot reliably distinguish every pale object from sky.
+Integration reduces errors, not guarantees perfect matting on arbitrary inputs.
+
+**Q: Is the current generator VGG16 with no normalization?**
+
+A: No. It is a nine-block CBAM ResNet with InstanceNorm and resize-convolution.
+VGG feature supervision was a separate ablation; the selected branch has no VGG loss.
+
+**Q: How many parameters run in the demo?**
+
+A: 11,447,541 in the RGB generator plus 1,097,690 in the matte: 12,545,231.
+The old 39.46-million figure counted four original V2 training networks instead.
+
+**Q: Is 0.50819 an accuracy of 50.8%?**
+
+A: No. It is the selected checkpoint's weighted teacher-fidelity score. Its units
+and formula differ from original V2's score; neither is a realism percentage.
+
+**Q: What do 30,600 and 7,800 refer to?**
+
+A: Cumulative selected RGB-student step and independently trained matte step.
+They are not summed, and 30,600 spans different continuation objectives.
+
+**Q: Has the newest night→day training improved the day→night demo?**
+
+A: No. It is an isolated inverse experiment and has not replaced this release's weights.
+
+The following original GAN questions concern historical V1/V2 unless stated otherwise.
+
 ### Problem and data
 
 **Q: What exactly is the input and output?**  
-A: Three-channel RGB. Day→night takes a daytime photograph and returns a plausible nighttime
-rendering of the same scene; the reverse generator performs night→day.
+A: Three-channel RGB. The public demo takes a daytime photograph and returns a
+plausible nighttime interpretation. Historical reverse weights remain, but inverse
+translation is not a supported demo feature.
 
 **Q: Why can’t you use supervised L1 against the sampled night image?**  
 A: It is a different scene. Pixelwise L1 would punish correct geometry and force one location to
 imitate an unrelated location.
+In contrast, the current generated teacher target comes from that same source,
+so supervised L1 is meaningful for imitation, though not proof of real night accuracy.
 
 **Q: Why not collect paired images?**  
 A: Exact pairs require fixed camera pose and static geometry across time; traffic, people, weather,
@@ -911,7 +1121,8 @@ A: The original scale examines fine detail; the downsampled scale has a wider ef
 view and examines broader texture and illumination.
 
 **Q: Are discriminators used in the demo?**  
-A: No. They train the generators. Inference only needs the selected directional EMA generator.
+A: No. The current inference path uses the selected EMA RGB student, the frozen
+sky/vegetation network, and analytic repair. Critics are historical training components.
 
 **Q: Why are there two generators rather than one conditional generator?**  
 A: Separate mappings simplify cycle training and let each direction specialize. A shared
@@ -1033,12 +1244,13 @@ sky change. Downsampling loses detail, while edge-preservation and appearance-ch
 conflict at the boundary.
 
 **Q: Why did V2.1 fail?**  
-A: It strengthened high-frequency preservation instead of fixing low-frequency semantic
-illumination. The network optimized detail while weakening the night transformation.
+A: It visibly weakened night transformation while pursuing fine-detail preservation.
+Loss imbalance is a plausible explanation, not an isolated experimentally proven cause.
 
 **Q: Why did LumiRender just darken?**  
-A: Its latent physical factors were not uniquely supervised. Global exposure reduction was a much
-easier path to lower several losses than learning correct emitters, reflections, and materials.
+A: Outputs looked mostly darkened. Weakly identified physical factors can permit
+exposure shortcuts instead of correct lighting; that is a plausible explanation,
+not proof of the sole cause or that every planned physical module learned correctly.
 
 **Q: What does “Gaussian” mean in LumiRender?**  
 A: Anisotropic 2D Gaussian masks for illumination and Gaussian kernels for bloom. It was not 3D
@@ -1070,7 +1282,19 @@ never captured.
 
 ## 15. Whiteboard explanation to practise
 
-Each team member should be able to draw this without notes:
+Each team member should first draw the **current inference system** without notes:
+
+```text
+SOURCE DAY → resize/pad → EMA attention ResNet student → RAW NIGHT ──┐
+SOURCE DAY → frozen sky/vegetation U-Net → guided matte ────────────┤
+SOURCE DAY → fine-edge recovery + analytic dim sky ────────────────┤
+                                                          FINAL HYBRID
+
+Final student training: external Turbo pseudo-targets → fidelity/highlight/sky loss
+Inference: no Turbo teacher, no DINO/VGG, no discriminator, no inverse generator
+```
+
+Then draw this separately as the **historical unpaired training system**:
 
 ```text
         G_DN                   G_ND
@@ -1107,6 +1331,13 @@ Do not say any of the following:
 - “FID proves objects are preserved.”
 - “Attention understands the sky.”
 - “The dataset is paired.”
+- “Our teacher targets are real photographs of the same scene at night.”
+- “We trained independently of externally pretrained translators.”
+- “The current demo runs only one neural network.”
+- “The sky repair retrained the 30,600-step generator.”
+- “We removed InstanceNorm and now use a VGG generator.”
+- “The current final loss is still the original eight-term V2 GAN objective.”
+- “Integrated sky repair guarantees every branch and cable hole is fixed.”
 - “Step 12k must be better than 4.5k.”
 - “V2 was trained from scratch.”
 - “V2.1 5.5k is the current V2 model.”
@@ -1131,9 +1362,12 @@ the chosen checkpoint.
 ### Suggested ownership
 
 - **Member 1 — problem/data:** task, unpaired learning, BDD100K, leakage prevention.
-- **Member 2 — architecture:** generator, CBAM, PatchGAN scales, global critic.
-- **Member 3 — training/losses:** all eight losses, optimizer, EMA, replay, checkpointing.
-- **Member 4 — experiments/demo:** V1/V2/V2.1/LumiRender, limitations, deployment, live demo.
+- **Member 2 — architecture:** current resize-decoder ResNet, CBAM, matte U-Net,
+  explicit compositor; distinguish historical PatchGAN/global critics.
+- **Member 3 — training/losses:** current distillation objective, external targets,
+  Adam/EMA and warm starts; separately explain historical V2's eight losses.
+- **Member 4 — experiments/demo:** V1/V2/V2.1/LumiRender/student lineage, failures,
+  hybrid limitations, model identity, deployment, and live verification.
 
 Ownership means leading that answer, not being the only person who knows it.
 
@@ -1149,7 +1383,8 @@ Ownership means leading that answer, not being the only person who knows it.
 
 - home PC awake, plugged in, and prevented from sleeping;
 - remote worker started and health checked;
-- V2 best selected by default;
+- `distilled_best` / `LumiCycle distilled student` selected at 512 maximum edge;
+- generator 30,600 and matte 7,800 present; returned metadata confirms sky repair;
 - one road input and one difficult branch/sky input prepared;
 - show exact model label and inference metadata;
 - keep comparison screenshots locally in case internet fails;
@@ -1159,17 +1394,22 @@ Ownership means leading that answer, not being the only person who knows it.
 
 ## 18. Defensible next experiments
 
-The next change should be isolated and evaluated against frozen V2 4.5k, not combined into another
-large untestable architecture.
+The next day→night change should be isolated and compared with the frozen current
+hybrid and its raw-student ablation; retain original V2 4.5k as a historical control.
+The following items describe research directions, not permission to launch training
+or evidence they have succeeded. Recent inverse work remains separate.
 
 1. **Normalization ablation:** retain V2 weights where compatible and compare InstanceNorm,
    no normalization, and affine/group alternatives. Distinguish generator normalization from the
    ImageNet preprocessing required by frozen VGG/DINO.
-2. **Semantic sky conditioning:** use reliable offline pseudo masks to apply stronger low-frequency
-   illumination change inside sky while preserving foreground boundaries.
+2. **Improve semantic matting:** the local sky/vegetation network and compositor
+   already exist; investigate finer masks, uncertain boundaries, and mask failures
+   rather than claiming semantic sky correction has not been implemented.
 3. **Input-conditioned discriminator:** judge `(source, translation)` jointly so realism is tied to
    preserving this scene, not only resembling any night image.
-4. **Anti-aliased resize-convolution:** replace transposed upsampling in a controlled adapter test.
+4. **Decoder filtering ablation:** resize-convolution is already active. Compare
+   controlled anti-aliasing/detail-recovery variants without treating that existing
+   replacement as a new contribution.
 5. **Boundary-aware loss:** focus on branch/sky boundaries and color fringing without globally
    overpowering lighting transformation.
 6. **Paired/coarsely aligned subset:** use confidence-weighted supervision where real temporal
@@ -1185,6 +1425,11 @@ darkens, weakens sky conversion, moves objects, creates fringes, or loses a blin
 ## 19. Reproduction commands
 
 These commands assume the prepared environment and licensed BDD100K data already exist.
+The current default demo is launched by `app.py`; exact current student/repair
+API arguments are in section 9. The V2 training/evaluation commands below reproduce
+**historical V2**, not the final distillation recipe or the hybrid evaluation.
+Do not run training merely to launch the demo, or claim a generic V2 resume trains
+the selected student. Keep outputs separate and inspect the intended configuration.
 
 ```powershell
 # Inspect configuration
@@ -1206,7 +1451,7 @@ Get-Content configs\lumicycle_v2.yaml
 .\.venv\Scripts\python.exe -m daynight.evaluate `
   --checkpoint runs\lumicycle_v2_bdd100k\checkpoints\step_00004500.pt
 
-# Launch local demo
+# Launch current local demo: selected student + integrated sky repair
 .\.venv\Scripts\python.exe app.py
 
 # Launch the remote GPU worker
@@ -1247,19 +1492,34 @@ Check paths before training.
 | Mode collapse | Generator outputs lose diversity or become nearly constant |
 | FID/KID | Distributional feature metrics; not direct structure guarantees |
 | Pseudo-label | Label predicted by an external teacher rather than human annotation |
+| Distillation | Train a smaller/local student to imitate teacher-generated targets |
+| Pseudo-pair | Source and generated corresponding target, not real paired ground truth |
+| Matte / alpha | Soft estimate of sky coverage at a pixel, including mixed boundaries |
+| Compositing | Explicitly blend/reconstruct foreground and background using a matte |
+| Hybrid inference | Learned RGB and matte networks plus explicit image processing |
+| Resize-convolution | Resize feature map, then apply a learned convolution |
 
 ---
 
 ## Final answer to remember
 
-LumiCycle V2 is a carefully engineered **unpaired translation system**, not a physically exact
-relighter. Its generator changes appearance; its local and global critics teach night/day realism;
-its preservation losses try to keep the scene fixed. V2 improved V1’s whole-frame lighting by
-adding global and regional illumination supervision while retaining useful generator weights and
-resetting over-strong critics. Step 4,500 is selected because later validation did not improve.
-The model’s strongest evidence is a reproducible implementation and honest experimental lineage;
-its weakest points are unpaired ambiguity, heuristic sky handling, structure-versus-lighting loss
-conflict, road-domain bias, and incomplete final evaluation.
+The project began with **unpaired CycleGAN-style learning**. The current day→night
+release is a **teacher-distilled attention ResNet plus a local sky/vegetation U-Net
+and explicit source-guided sky compositor**. The selected RGB EMA is step 30,600;
+the matte is step 7,800. The sky repair is integrated into inference, not baked into
+new generator weights. External Turbo targets supplied supervision and must be credited.
+Night→day is not a public feature, and its new experiments have not changed this model.
+
+Our strongest evidence is inspectable code, retained checkpoints, documented
+experiments, and a working local pipeline. Fine structures, direct sun/reflections,
+analytic-sky plausibility, out-of-domain scenes, teacher artifacts, and incomplete
+final evaluation remain weaknesses. A curated example is not a universal quality claim.
 
 Being able to explain those strengths **and** weaknesses is the clearest proof that the team
 understands the project.
+> Deployment update, 23 October 2026: the remote site restores Night → Day as
+> a separately labeled experimental 16.5k local inverse. Historical statements
+> below about withdrawing the inverse refer to the earlier release. This is
+> not a quality promotion: noise, glare and incomplete daylight remain. The
+> day-to-night default, weights and integrated repair are unchanged.
+

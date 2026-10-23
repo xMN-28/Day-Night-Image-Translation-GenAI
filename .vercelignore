@@ -13,6 +13,7 @@ daynight/
 docs/
 lumicycle.egg-info/
 outputs/
+output/
 runs/
 scripts/
 tests/

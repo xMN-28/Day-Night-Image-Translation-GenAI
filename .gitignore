@@ -12,6 +12,7 @@ datasets/
 checkpoints/
 runs/
 outputs/
+output/pdf/lumicycle_architecture/
 artifacts/
 external/
 *.pt

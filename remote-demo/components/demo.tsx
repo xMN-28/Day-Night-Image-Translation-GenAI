@@ -28,7 +28,7 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const direction: Direction = "day_to_night";
+  const [direction, setDirection] = useState<Direction>("day_to_night");
   const [modelId, setModelId] = useState("distilled_best");
   const [maximumEdge, setMaximumEdge] = useState(512);
   const [accessCode, setAccessCode] = useState("");
@@ -172,7 +172,7 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
         <div>
           <p className="eyebrow">REMOTE GPU SHOWCASE</p>
           <h1>LumiCycle</h1>
-          <p>Day → night translation, rendered on our home RTX 4070 Super.</p>
+          <p>Day / night translation, rendered on our home RTX 4070 Super.</p>
         </div>
         <div className={`worker-pill ${health.online ? "online" : "offline"}`}>
           <span aria-hidden="true" />
@@ -218,23 +218,31 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
             <fieldset>
               <legend>Translation</legend>
               <div className="segmented">
-                <button
-                  type="button"
-                  className="active"
-                >
-                  Day → Night
-                </button>
+                {(["day_to_night", "night_to_day"] as Direction[]).map((next) => (
+                  <button key={next} type="button" disabled={busy}
+                    className={direction === next ? "active" : ""}
+                    onClick={() => {
+                      setDirection(next);
+                      setModelId(next === "night_to_day" ? "night_day_experimental" : "distilled_best");
+                      setJob(null);
+                      setJobToken("");
+                      setError("");
+                    }}>
+                    {next === "day_to_night" ? "Day → Night" : "Night → Day (experimental)"}
+                  </button>
+                ))}
               </div>
             </fieldset>
             <label>
               <span>Model</span>
               <select
                 value={modelId}
+                disabled={busy}
                 onChange={(event) => {
                   setModelId(event.target.value);
                 }}
               >
-                {MODEL_OPTIONS.map((model) => (
+                {MODEL_OPTIONS.filter((model) => model.directions.includes(direction)).map((model) => (
                   <option key={model.id} value={model.id}>{model.label}</option>
                 ))}
               </select>
@@ -283,7 +291,7 @@ export function Demo({ accessCodeRequired }: { accessCodeRequired: boolean }) {
             <div className="output-stage">
               {job?.outputUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={job.outputUrl} alt="Night translation output" />
+                <img src={job.outputUrl} alt="Translation output" />
               ) : (
                 <div className="output-empty"><span>☾</span><p>The generated image will appear here.</p></div>
               )}

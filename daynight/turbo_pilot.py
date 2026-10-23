@@ -36,11 +36,19 @@ def digest(path):
     return h.hexdigest()
 
 
-def fetch_official_checkpoint(path):
-    ranged_download(OFFICIAL_URL, path, workers=4)
+def reference_spec(direction="day_to_night"):
+    if direction not in {"day_to_night", "night_to_day"}:
+        raise ValueError(f"Unsupported experimental reference direction: {direction}")
+    filename = "day2night.pkl" if direction == "day_to_night" else "night2day.pkl"
+    return filename, f"https://www.cs.cmu.edu/~img2img-turbo/models/{filename}"
 
 
-def load_official(cache):
+def fetch_official_checkpoint(path, url=OFFICIAL_URL):
+    ranged_download(url, path, workers=4)
+
+
+def load_official(cache, direction="day_to_night"):
+    filename, official_url = reference_spec(direction)
     # Local-only loading uses the pinned CLI snapshot; no hidden main-branch fetch.
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -83,20 +91,20 @@ def load_official(cache):
     sys.path.insert(0, str(source / "src"))
     from cyclegan_turbo import CycleGAN_Turbo
 
-    checkpoint = cache / "official_models/day2night.pkl"
-    fetch_official_checkpoint(checkpoint)
+    checkpoint = cache / "official_models" / filename
+    fetch_official_checkpoint(checkpoint, official_url)
 
     class CheckedTurbo(CycleGAN_Turbo):
         def load_ckpt_from_url(self, url, ckpt_folder):
-            if url != OFFICIAL_URL:
+            if url != official_url:
                 raise ValueError(f"Unexpected official checkpoint request: {url}")
             # Upstream torch.load assumes older defaults. Explicit CPU/weights-only
             # loading avoids accidental CUDA allocations and unrestricted pickle.
             state = torch.load(checkpoint, map_location="cpu", weights_only=True)
             self.load_ckpt_from_state_dict(state)
 
-    print("Loading official external CycleGAN-Turbo day_to_night", flush=True)
-    model = CheckedTurbo(pretrained_name="day_to_night", ckpt_folder=str(checkpoint.parent))
+    print(f"Loading official external CycleGAN-Turbo {direction}", flush=True)
+    model = CheckedTurbo(pretrained_name=direction, ckpt_folder=str(checkpoint.parent))
     return model.eval().half().requires_grad_(False), checkpoint, commit
 
 

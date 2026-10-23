@@ -1,5 +1,18 @@
 # Current Model Architecture and Experiment History
 
+## Authoritative current snapshot — 22 October 2026
+
+Read [Final Day–Night Architecture](../FINAL_DAY_NIGHT_ARCHITECTURE.md) for the
+consolidated current model, exact selected checkpoints, architecture, training
+objective, integrated sky repair, runtime defaults, limitations, and attribution.
+The default is the step-30,600 distilled student plus step-7,800 sky matte and
+explicit compositing at 512 px maximum edge. Recent night-to-day experiments have
+not changed this day-to-night release and are not public demo features.
+
+The dated sections below preserve experiment history. Older references to V2 as
+the default or to the raw student without repair are historical, not current
+default behavior. The new consolidated document supersedes those descriptions.
+
 ## Integrated sky repair — 22 October 2026
 
 The distilled-student inference option now **includes** the separate sky repair
@@ -709,3 +722,13 @@ physics story does not help when supervision lets the system choose global darke
 The next improvement should focus on the actual bottlenecks—normalization, semantic sky control,
 local light supervision, and the balance between structural fidelity and illumination change—while
 retaining the useful V2 weights and using short visual gates before any long training run.
+# Remote inverse preview — 23 October 2026
+
+Day-to-night architecture and weights below remain unchanged. The remote site
+now additionally exposes a separate experimental night-to-day EMA generator at
+global step 16,500 (`night2day_CARLA12_aux10_from16000_v1/adaptation_00500.pt`).
+It is a 9-block CBAM residual generator with transpose-convolution upsampling,
+not the day-to-night resize decoder or sky compositor. It has not passed the
+visual acceptance gate. See `NIGHT_TO_DAY_CARLA_STATIC_ABLATION.md`; no
+DarkDriving-derived model or results are published.
+

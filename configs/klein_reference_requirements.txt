@@ -1,0 +1,5 @@
+# Isolated --target E:/LumiCycleCache/klein-runtime; never upgrade training environment.
+# Uses existing torch 2.12.1+cu130, transformers 5.16.1, accelerate 1.14.0.
+diffusers==0.41.0
+huggingface-hub==1.33.0
+safetensors==0.8.0

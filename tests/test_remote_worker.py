@@ -10,6 +10,9 @@ def test_remote_catalog_uses_project_relative_checkpoint_paths():
     assert MODEL_CATALOG["v2_best"].checkpoint.is_absolute()
     assert MODEL_CATALOG["lumirender_final"].directions == ("day_to_night",)
     assert all(isinstance(spec.checkpoint, Path) for spec in MODEL_CATALOG.values())
+    inverse = MODEL_CATALOG["night_day_experimental"]
+    assert inverse.directions == ("night_to_day",)
+    assert "experimental" in inverse.label
 
 
 def test_remote_worker_rejects_insecure_nonlocal_server():

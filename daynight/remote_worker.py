@@ -30,6 +30,13 @@ class RemoteModel:
 
 
 MODEL_CATALOG = {
+    "night_day_experimental": RemoteModel(
+        "LumiCycle night-to-day — experimental (16.5k)",
+        "LumiCycle night-to-day experimental",
+        Path(os.getenv("LUMICYCLE_INVERSE_CHECKPOINT",
+            "E:/LumiCycleCache/experiments/night2day_CARLA12_aux10_from16000_v1/adaptation_00500.pt")),
+        ("night_to_day",),
+    ),
     "distilled_best": RemoteModel(
         "LumiCycle student + sky repair — experimental",
         "LumiCycle distilled student",

@@ -1,4 +1,82 @@
-# Changes and experiment handover — 21 October 2026
+# Changes and experiment handover
+
+## Remote inverse preview and repository refresh — 23 October 2026
+
+- Restored Night → Day to the remote direction selector as experimental, using
+  local EMA inverse `night2day_CARLA12_aux10_from16000_v1/adaptation_00500.pt`
+  at global step 16,500. This is not a quality-gate promotion: noise, retained
+  glare and lighting artifacts persist. No DarkDriving training is involved.
+- Added a direction-specific inference adapter; day-to-night checkpoints and
+  integrated sky repair remain unchanged. Wrong model/direction pairs are rejected.
+- Refreshed README with real validation comparisons, an experimental inverse
+  collage, architecture preview, current run instructions and separate provenance.
+- Removed 14.87 GiB of unused downloaded FLUX reference weights on E:. Kept
+  configuration/license/provenance, all locally trained weights, data and results.
+  Reference weights can be downloaded again; deletion is not an architecture change.
+- Exact checkpoint duplicate audit found zero byte-identical duplicate files.
+  No unique trained checkpoint was deleted. Lossless NTFS compression of `runs/`
+  is used to reduce D: allocation without changing checkpoint bytes or paths.
+
+
+## Documentation synchronization — 22 October 2026
+
+This entry records the latest documentation work only. **No generator or matte
+weights, training objectives, inference code, demo defaults, or deployment were
+changed by this update.** No training was started and nothing was pushed or deployed.
+
+### Documents created or updated
+
+- Created [FINAL_DAY_NIGHT_ARCHITECTURE.md](../FINAL_DAY_NIGHT_ARCHITECTURE.md)
+  as the consolidated current day→night architecture: exact selected checkpoints,
+  parameter counts, network layers, active final training losses, integrated sky
+  repair, external teacher attribution, inference behavior, and unresolved flaws.
+- Updated [CURRENT_MODEL_ARCHITECTURE.md](CURRENT_MODEL_ARCHITECTURE.md) to point
+  to that snapshot and distinguish historical V2/raw-student descriptions from
+  the current hybrid default.
+- Updated [PROJECT_MASTER_GUIDE.md](PROJECT_MASTER_GUIDE.md): corrected the model
+  identity and 90-second explanation; added current architecture/distillation
+  teaching material, professor Q&A, current API example, whiteboard diagram,
+  deployment checks, limitations, and attribution. Original V2 architecture,
+  eight-loss recipe, training iteration, and optimization settings remain as
+  **historical teaching material**, not the current final student recipe.
+- Updated this changelog to clarify obsolete defaults and the withdrawn initial
+  showcase selection.
+
+### Current state to communicate
+
+The default is **LumiCycle student + integrated sky repair — experimental**
+(`distilled_best` remotely; `LumiCycle distilled student` locally), at 512 px
+maximum edge. It combines the selected EMA RGB generator at cumulative global
+step **30,600** with the frozen local sky/vegetation network at step **7,800**
+and explicit source-guided compositing. Repair integration did not retrain or
+replace those generator weights. Active learned inference parameters total
+**12,545,231** across the two networks.
+
+The selected final distillation control uses teacher fidelity, highlight,
+bright-footprint, and sky losses; it does not execute the original V2 GAN/cycle
+recipe. External CycleGAN-Turbo supplied generated training targets and must
+be acknowledged. The selected branch has no VGG feature loss; the RGB generator
+still uses InstanceNorm and resize-convolution rather than a VGG backbone.
+
+Recent night→day experiments are a separate development track, not a modification
+of this day→night release or a restored public feature. Current public inference
+remains **day→night only**. Fine sky gaps, sun/reflections, artificial glow,
+incorrect masks, and out-of-domain failures remain possible; documentation does
+not establish a new quality improvement or a passed final-test acceptance gate.
+
+The retained current showcase has **14 curated hybrid validation examples**.
+The initial 20-image raw selection described in older entries is withdrawn.
+Curated demonstrations are not a random test benchmark.
+
+### Checks for this documentation update
+
+The master guide's local Markdown links resolved and its code fences were balanced.
+Documentation whitespace checks passed. These are document checks, not a fresh
+training run, GPU benchmark, test-suite run, or remote end-to-end verification.
+
+Entries below retain earlier implementation and experiment history. Older V2
+default, initial 20-image pack, and canceled-goal statements describe their dated
+handover, not today's defaults or the subsequent separate inverse experiments.
 
 ## Follow-up implementation — 22 October 2026
 
