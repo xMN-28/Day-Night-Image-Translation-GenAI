@@ -11,19 +11,20 @@ import torch
 from PIL import Image, ImageOps
 
 from .models import build_models
+from .showcase_paths import showcase_checkpoint
 from .turbo_reference import TurboReference
 from .utils import pil_to_tensor, tensor_to_pil
 
 MODEL_PATHS = {
-    "LumiCycle night-to-day experimental": Path(
-        "E:/LumiCycleCache/experiments/night2day_CARLA12_aux10_from16000_v1/adaptation_00500.pt"
+    "LumiCycle night-to-day experimental": showcase_checkpoint(
+        "night_day_experimental", "E:/LumiCycleCache/experiments/night2day_CARLA12_aux10_from16000_v1/adaptation_00500.pt"
     ),
-    "LumiCycle distilled student": Path(
-        "E:/LumiCycleCache/experiments/turbo_vgg_target_control/best.pt"
+    "LumiCycle distilled student": showcase_checkpoint(
+        "distilled_best", "E:/LumiCycleCache/experiments/turbo_vgg_target_control/best.pt"
     ),
-    "LumiCycle": Path("runs/lumicycle_bdd100k/checkpoints"),
-    "LumiCycle V2": Path("runs/lumicycle_v2_bdd100k/checkpoints"),
-    "LumiRender": Path("runs/lumirender_physics_bdd100k/checkpoints"),
+    "LumiCycle": showcase_checkpoint("v1_best", "runs/lumicycle_bdd100k/checkpoints"),
+    "LumiCycle V2": showcase_checkpoint("v2_best", "runs/lumicycle_v2_bdd100k/checkpoints"),
+    "LumiRender": showcase_checkpoint("lumirender_final", "runs/lumirender_physics_bdd100k/checkpoints"),
     "CycleGAN": Path("runs/cyclegan_bdd100k/checkpoints"),
 }
 
@@ -181,6 +182,7 @@ class ModelManager:
         result = tensor_to_pil(output).crop(crop)
         metadata = {
             "model": requested_model,
+            "global_step": self.global_step,
             "direction": direction,
             "input_resolution": f"{image.width}x{image.height}",
             "inference_resolution": f"{result.width}x{result.height}",

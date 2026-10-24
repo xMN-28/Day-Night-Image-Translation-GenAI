@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 
+from .showcase_paths import showcase_checkpoint
 from .sky_refinement import SkyStudent, compose_night, predict_matte
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class SkyRepair:
     def __init__(self, checkpoint: Path | None = None):
         self.checkpoint = checkpoint or Path(os.getenv(
-            "LUMICYCLE_SKY_MATTE_CHECKPOINT", str(ROOT / "runs/sky_student_regions_v2/best.pt")
+            "LUMICYCLE_SKY_MATTE_CHECKPOINT", str(showcase_checkpoint(
+                "sky_matte", ROOT / "runs/sky_student_regions_v2/best.pt"))
         ))
         self.student = None
         self.step = None

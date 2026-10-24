@@ -1,5 +1,10 @@
 # LumiCycle Remote Demo
 
+Showcase-only update, 24 October 2026: the worker now prefers compact local
+`checkpoints/showcase/<model-id>.pt` exports for every model and sky matte.
+The historical paths below are fallbacks only; training caches may be removed.
+Use `../SHOWCASE_ONLY.md` for the maintained local deployment instructions.
+
 The default public mapping is **Day → Night**. The default is now the local
 **student + sky repair** hybrid at 512 px; metadata reports `sky_repair: true`.
 It needs both the generator and `runs/sky_student_regions_v2/best.pt` matte weights.

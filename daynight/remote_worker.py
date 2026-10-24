@@ -17,6 +17,7 @@ import torch
 from PIL import Image
 
 from .inference import ModelManager
+from .showcase_paths import showcase_checkpoint
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -80,6 +81,20 @@ MODEL_CATALOG = {
         / "runs/lumirender_physics_bdd100k/checkpoints/step_00034004.pt",
         ("day_to_night",),
     ),
+}
+
+# Exported weights retain the same tensors, model IDs and step labels, without
+# training optimizers/discriminators. Explicit environment overrides still win.
+MODEL_CATALOG = {
+    model_id: RemoteModel(
+        spec.label, spec.engine_name,
+        (spec.checkpoint if os.getenv({
+            "distilled_best": "LUMICYCLE_DISTILLED_STUDENT_CHECKPOINT",
+            "night_day_experimental": "LUMICYCLE_INVERSE_CHECKPOINT",
+        }.get(model_id, "LUMICYCLE_UNUSED_OVERRIDE"))
+         else showcase_checkpoint(model_id, spec.checkpoint)),
+        spec.directions,
+    ) for model_id, spec in MODEL_CATALOG.items()
 }
 
 

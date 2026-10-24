@@ -12,6 +12,8 @@ datasets/
 checkpoints/
 runs/
 outputs/
+output/
+docs/
 output/pdf/lumicycle_architecture/
 artifacts/
 external/

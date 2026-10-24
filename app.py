@@ -24,8 +24,15 @@ CSS = """
 
 
 def _model_choices() -> list[str]:
-    choices = ["LumiCycle V2", "LumiCycle", "CycleGAN", "Turbo reference"]
-    from daynight.inference import MODEL_PATHS
+    choices = []
+    from daynight.inference import MODEL_PATHS, _resolve_checkpoint
+
+    for name in ("LumiCycle V2", "LumiCycle", "CycleGAN"):
+        try:
+            _resolve_checkpoint(MODEL_PATHS[name])
+            choices.append(name)
+        except FileNotFoundError:
+            pass
 
     if MODEL_PATHS["LumiCycle distilled student"].is_file():
         choices.insert(1, "LumiCycle distilled student")
