@@ -43,7 +43,8 @@ foreach ($taskTarget in $taskTargets) {
     $taskInfo = Get-Item -LiteralPath $taskResolved -Force
     if ($taskInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Refusing reparse-point root: $taskResolved" }
     $taskBytes = (Get-ChildItem -LiteralPath $taskResolved -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-    Write-Output ((if ($Apply) { 'Removing ' } else { 'Audit ' }) + $taskResolved)
+    $taskAction = if ($Apply) { 'Removing ' } else { 'Audit ' }
+    Write-Output ($taskAction + $taskResolved)
     if ($Apply) { Remove-Item -LiteralPath $taskResolved -Recurse -Force -ErrorAction Stop }
     $taskReport += [pscustomobject]@{Path=$taskResolved;LogicalBytes=$taskBytes;Removed=[bool]$Apply}
 }
