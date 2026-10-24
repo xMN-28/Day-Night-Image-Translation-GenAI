@@ -30,7 +30,8 @@ Windows-user credential remains installed; it is never committed to Git.
 
 Training datasets and manifests, teacher targets, external reference downloads,
 intermediate checkpoints, discriminators/optimizer states, research environment
-caches, bulk experimental outputs and rebuildable frontend dependencies/builds.
+caches, bulk experimental outputs and the frontend build cache. The small local
+frontend dependency directory is retained for future web updates and API tests.
 The full training source remains in Git, but exact training resumption is no
 longer available. Rerunning training requires new data/downloads and setup.
 
